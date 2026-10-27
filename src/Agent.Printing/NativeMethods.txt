@@ -1,0 +1,23 @@
+// API Win32 yang di-generate CsWin32. System.Drawing.Printing tidak didukung di
+// Windows service, jadi agent memanggil winspool + GDI langsung (lihat PRD).
+OpenPrinter
+ClosePrinter
+EnumPrinters
+GetPrinter
+EnumJobs
+GetJob
+SetJob
+CreateDC
+DeleteDC
+StartDoc
+EndDoc
+StartPage
+EndPage
+GetDeviceCaps
+EnumPorts
+GetDefaultPrinter
+PRINTER_INFO_2W
+PORT_INFO_2W
+PRINTER_STATUS_*
+PRINTER_ATTRIBUTE_*
+PRINTER_ENUM_*

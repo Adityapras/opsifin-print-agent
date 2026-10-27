@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    # Windows agar build mencerminkan target sebenarnya (net10.0-windows, Native AOT).
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - run: dotnet build -c Release
+
+      - run: dotnet test -c Release --no-build
+
+      - name: Publish Native AOT
+        run: dotnet publish src/Agent.Service -c Release -r win-x64 -o artifacts/agent
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-win-x64
+          path: artifacts/agent

@@ -1,0 +1,363 @@
+# SALINAN dari opsifin-print-hub/contracts/agent-v1.yaml. Ubah di repo Hub dulu, lalu salin ke sini.
+openapi: 3.1.0
+info:
+  title: Opsifin Print Hub — Agent API
+  version: 1.0.0
+  description: |
+    Kontrak antara Print Agent (.NET, di PC klien) dan Hub. Sumber kebenaran untuk
+    repo opsifin-print-hub dan opsifin-print-agent; lihat docs/PRD.md bagian
+    "Kontrak API Agent ↔ Hub".
+
+    Aturan v1: perubahan hanya boleh menambah field opsional. Perubahan yang memecah
+    kompatibilitas menjadi /agent/v2.
+servers:
+  - url: https://hub.example/agent/v1
+
+security:
+  - agentToken: []
+
+paths:
+  /enroll:
+    post:
+      summary: Tukar pairing code dengan identitas agent (sekali saat instalasi)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EnrollRequest' }
+      responses:
+        '201':
+          description: Agent terdaftar
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EnrollResponse' }
+        '422': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+
+  /heartbeat:
+    post:
+      summary: Laporan rutin tiap 30 detik; balasan membawa config dan perintah
+      parameters:
+        - $ref: '#/components/parameters/AgentVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/HeartbeatRequest' }
+      responses:
+        '200':
+          description: Diterima
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HeartbeatResponse' }
+        '401': { $ref: '#/components/responses/Error' }
+        '426': { $ref: '#/components/responses/Error' }
+
+  /jobs/claim:
+    post:
+      summary: Klaim job untuk printer yang sedang kosong (maksimal 1 job per printer)
+      parameters:
+        - $ref: '#/components/parameters/AgentVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [printer_ids]
+              properties:
+                printer_ids:
+                  type: array
+                  items: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Ada job
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [jobs]
+                properties:
+                  jobs:
+                    type: array
+                    items: { $ref: '#/components/schemas/ClaimedJob' }
+        '204':
+          description: Tidak ada job
+        '401': { $ref: '#/components/responses/Error' }
+
+  /jobs/{job_id}/events:
+    post:
+      summary: Kirim event job (juga dipakai untuk kirim ulang dari outbox)
+      parameters:
+        - $ref: '#/components/parameters/AgentVersion'
+        - name: job_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [events]
+              properties:
+                events:
+                  type: array
+                  minItems: 1
+                  items: { $ref: '#/components/schemas/JobEvent' }
+      responses:
+        '200':
+          description: Diproses. event_id yang sudah pernah diterima masuk ke duplicates.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EventsResponse' }
+        '401': { $ref: '#/components/responses/Error' }
+        '409':
+          description: Lease sudah tidak dipegang agent ini (lease_lost); hentikan job.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /documents/{document_id}:
+    get:
+      summary: Unduh PDF lewat signed URL dari respons klaim (berlaku 5 menit)
+      security: []
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: signature
+          in: query
+          required: true
+          schema: { type: string }
+        - name: expires
+          in: query
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Isi PDF; agent wajib mencocokkan SHA-256 dengan document.sha256
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        '403':
+          description: Signature salah atau kedaluwarsa
+
+  /commands/{command_id}/result:
+    post:
+      summary: Laporkan hasil perintah dari heartbeat
+      parameters:
+        - name: command_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [succeeded, failed] }
+                message: { type: string }
+                attachment:
+                  type: string
+                  format: binary
+                  description: Opsional, mis. zip log untuk upload_logs
+      responses:
+        '204': { description: Diterima }
+        '401': { $ref: '#/components/responses/Error' }
+
+components:
+  securitySchemes:
+    agentToken:
+      type: http
+      scheme: bearer
+      description: "`<agent_id>.<device_secret>`; Hub menyimpan hash SHA-256 secret saja."
+
+  parameters:
+    AgentVersion:
+      name: X-Agent-Version
+      in: header
+      required: true
+      schema: { type: string, example: 1.0.0 }
+
+  responses:
+    Error:
+      description: Error standar
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              examples: [invalid_token, lease_lost, validation_failed, agent_outdated, rate_limited]
+            message: { type: string }
+
+    EnrollRequest:
+      type: object
+      required: [pairing_code, hostname, os, agent_version, machine_id]
+      properties:
+        pairing_code: { type: string, minLength: 8, maxLength: 8 }
+        hostname: { type: string }
+        os: { type: string, example: Windows 11 Pro 24H2 }
+        agent_version: { type: string }
+        machine_id: { type: string, description: MachineGuid Windows }
+
+    EnrollResponse:
+      type: object
+      required: [agent_id, device_secret, tenant_id, site_id, config]
+      properties:
+        agent_id: { type: string, format: uuid }
+        device_secret: { type: string, description: 256-bit acak, base64url; hanya dikirim sekali }
+        tenant_id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        config: { $ref: '#/components/schemas/AgentConfig' }
+
+    PrinterReport:
+      type: object
+      required: [name, status]
+      properties:
+        name: { type: string, description: Nama printer di Windows }
+        driver: { type: string }
+        port: { type: string }
+        is_default: { type: boolean }
+        status:
+          type: string
+          enum: [ONLINE, OFFLINE, PAPER_OUT, PAPER_JAM, NO_TONER, DOOR_OPEN, ERROR, UNKNOWN]
+        raw_status: { type: integer, description: PRINTER_INFO_2.Status mentah }
+        queue_length: { type: integer }
+
+    HeartbeatRequest:
+      type: object
+      required: [agent_version, uptime_s, agent_time, printers]
+      properties:
+        agent_version: { type: string }
+        uptime_s: { type: integer }
+        agent_time: { type: string, format: date-time }
+        config_version: { type: integer, description: Versi config yang sedang dipakai agent }
+        capabilities:
+          type: array
+          items: { type: string }
+          example: [pdfium, sumatra]
+        printers:
+          type: array
+          items: { $ref: '#/components/schemas/PrinterReport' }
+
+    HeartbeatResponse:
+      type: object
+      required: [server_time, config_version]
+      properties:
+        server_time: { type: string, format: date-time }
+        config_version: { type: integer }
+        config:
+          description: Hanya dikirim bila config_version berubah
+          $ref: '#/components/schemas/AgentConfig'
+        commands:
+          type: array
+          items: { $ref: '#/components/schemas/Command' }
+
+    AgentConfig:
+      type: object
+      properties:
+        claim_interval_s: { type: integer, default: 5 }
+        heartbeat_interval_s: { type: integer, default: 30 }
+        log_level: { type: string, enum: [debug, info, warning, error] }
+        printers:
+          type: array
+          items:
+            type: object
+            required: [printer_id, windows_name]
+            properties:
+              printer_id: { type: string, format: uuid }
+              windows_name: { type: string }
+              print: { $ref: '#/components/schemas/PrintSettings' }
+
+    PrintSettings:
+      type: object
+      properties:
+        engine: { type: string, enum: [pdfium, sumatra], default: pdfium }
+        copies: { type: integer, default: 1 }
+        duplex: { type: boolean, default: false }
+        tray: { type: [string, 'null'] }
+        scale: { type: string, enum: [noscale, fit], default: noscale }
+
+    Command:
+      type: object
+      required: [id, type]
+      properties:
+        id: { type: string, format: uuid }
+        type:
+          type: string
+          enum: [test_page, upload_logs, update, rotate_secret, reload_config]
+        args:
+          type: object
+          description: |
+            update: { url, sha256, signature, version }
+            test_page: { printer_id }
+            upload_logs: { hours }
+            rotate_secret: { new_secret } — secret lama berlaku 10 menit setelah secret baru dipakai
+
+    ClaimedJob:
+      type: object
+      required: [job_id, attempt_id, printer_id, lease_until, document, print]
+      properties:
+        job_id: { type: string, format: uuid }
+        attempt_id: { type: string, format: uuid }
+        printer_id: { type: string, format: uuid }
+        lease_until: { type: string, format: date-time }
+        document:
+          type: object
+          required: [url, sha256, pages, size_bytes]
+          properties:
+            url: { type: string, format: uri, description: Signed URL, berlaku 5 menit }
+            sha256: { type: string }
+            pages: { type: integer }
+            size_bytes: { type: integer }
+        print: { $ref: '#/components/schemas/PrintSettings' }
+
+    JobEvent:
+      type: object
+      required: [event_id, attempt_id, type, occurred_at]
+      properties:
+        event_id: { type: string, format: uuid, description: UUIDv7 dibuat agent; kunci idempotensi }
+        attempt_id: { type: string, format: uuid }
+        type:
+          type: string
+          enum: [download_started, download_completed, spooled, spooler_status, completed, printed_unverified, print_error]
+        occurred_at: { type: string, format: date-time, description: Jam agent }
+        data:
+          type: object
+          description: "mis. spooler_job_id, raw_status (PAPEROUT), pages_printed, error_code, duration_ms"
+
+    EventsResponse:
+      type: object
+      required: [accepted, duplicates, job_state, abort]
+      properties:
+        accepted:
+          type: array
+          items: { type: string, format: uuid }
+        duplicates:
+          type: array
+          items: { type: string, format: uuid }
+        job_state:
+          type: string
+          enum: [received, queued, claimed, printing, printed, skipped, failed, cancelled]
+        lease_until: { type: [string, 'null'], format: date-time }
+        abort:
+          type: boolean
+          description: true bila job dibatalkan operator; agent menghentikan job dan tidak mencetak ulang

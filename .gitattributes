@@ -1,0 +1,4 @@
+# Menjaga akhir baris konsisten saat repo dipindah antara WSL dan Windows.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
