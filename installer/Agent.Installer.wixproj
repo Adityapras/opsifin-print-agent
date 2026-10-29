@@ -1,0 +1,13 @@
+<Project Sdk="WixToolset.Sdk/6.0.2">
+
+  <PropertyGroup>
+    <OutputName>OpsifinPrintAgent</OutputName>
+    <Platform>x64</Platform>
+    <AgentPublishDir Condition="'$(AgentPublishDir)' == ''">$(MSBuildThisFileDirectory)..\artifacts\agent-next</AgentPublishDir>
+    <DefineConstants>AgentPublishDir=$(AgentPublishDir)</DefineConstants>
+    <!-- e_sqlite3.dll tidak memiliki version resource; ICE60 tidak relevan untuk
+         native dependency yang selalu diganti bersama executable agent. -->
+    <SuppressIces>ICE60</SuppressIces>
+  </PropertyGroup>
+
+</Project>

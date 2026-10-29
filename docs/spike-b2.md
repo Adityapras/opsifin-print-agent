@@ -79,3 +79,15 @@ Kumpulkan semua file di `C:\ProgramData\Opsifin\PrintAgent\spike-b2\`.
 | | | USB / Bluetooth / jaringan per user / per mesin / TCP/IP lokal | | ✓/✗ | ✓/✗ | ✓/✗ | |
 
 Status yang tampil di spike ini hanya potret saat laporan dibuat. Akurasinya (kertas habis, printer mati, Bluetooth putus) diuji terpisah di B3.
+
+### Hasil awal — ADITYA-PRASETYO, 2026-10-27
+
+| Lingkungan | Hasil | Catatan |
+| --- | --- | --- |
+| User `ADITYA-PRASETYO\Aditya Prasetyo`, sesi 1 | 7 printer terlihat | Seluruhnya printer virtual atau fax; belum mewakili printer produksi |
+| `LocalSystem`, sesi 0 | 6 printer terlihat | `OneNote (Desktop) - Protected` yang beratribut `PER_USER` tidak terlihat; enam antrean lokal lainnya tetap terlihat |
+
+Hasil ini memvalidasi bahwa inventaris berjalan dari console dan Windows service, serta
+mendukung hipotesis bahwa printer `PER_USER` tidak tersedia bagi `LocalSystem`. B2 belum
+lulus karena mesin ini tidak memiliki printer fisik produksi; pengujian USB, Bluetooth,
+jaringan per user, per mesin, dan TCP/IP lokal di PC klien tetap diperlukan.

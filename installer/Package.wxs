@@ -1,0 +1,58 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="Opsifin Print Agent"
+    Manufacturer="Opsigo"
+    Version="0.1.0"
+    UpgradeCode="D869047A-A45C-4C3A-B1CE-3D716396B99D"
+    Scope="perMachine">
+
+    <MajorUpgrade DowngradeErrorMessage="Versi Opsifin Print Agent yang lebih baru sudah terpasang." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="OpsigoDirectory" Name="Opsigo">
+        <Directory Id="INSTALLFOLDER" Name="Opsifin Print Agent" />
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="Opsifin Print Agent" Level="1">
+      <ComponentGroupRef Id="AgentFiles" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="AgentFiles" Directory="INSTALLFOLDER">
+      <Component Id="AgentServiceComponent" Guid="EEDBE435-B94A-4A50-BA56-83EE56419846">
+        <File Id="AgentServiceExe" Source="$(var.AgentPublishDir)\Agent.Service.exe" KeyPath="yes" />
+        <ServiceInstall
+          Id="AgentServiceInstall"
+          Name="OpsifinPrintAgent"
+          DisplayName="Opsifin Print Agent"
+          Description="Mencetak job dari Opsifin Print Hub melalui printer Windows."
+          Type="ownProcess"
+          Start="auto"
+          ErrorControl="normal"
+          Account="LocalSystem">
+          <ServiceDependency Id="Spooler" />
+        </ServiceInstall>
+        <ServiceControl
+          Id="AgentServiceControl"
+          Name="OpsifinPrintAgent"
+          Start="install"
+          Stop="both"
+          Remove="uninstall"
+          Wait="yes" />
+      </Component>
+
+      <Component Id="PdfiumComponent" Guid="A2E30B9F-950A-417C-98ED-B26DA4A4048C">
+        <File Id="PdfiumDll" Source="$(var.AgentPublishDir)\pdfium.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="SqliteComponent" Guid="76B4214C-F087-4F9E-AB39-8C7B0B754D77">
+        <File Id="SqliteDll" Source="$(var.AgentPublishDir)\e_sqlite3.dll" KeyPath="yes" />
+      </Component>
+      <Component Id="AppSettingsComponent" Guid="B269D49F-8AEF-4DCE-993B-831952909BFD" NeverOverwrite="yes">
+        <File Id="AppSettingsJson" Source="$(var.AgentPublishDir)\appsettings.json" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

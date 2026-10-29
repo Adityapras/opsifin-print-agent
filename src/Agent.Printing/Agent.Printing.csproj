@@ -1,11 +1,26 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFrameworks>net10.0;net10.0-windows</TargetFrameworks>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
-  <ItemGroup>
+  <!-- Logika keputusan spooler ikut ditargetkan ke net10.0 agar aturan completion bisa
+       diuji di Linux/CI tanpa membawa API Windows. Implementasi Win32 hanya dikompilasi
+       untuk executable Windows. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <Compile Remove="PrinterFlags.cs" />
+    <Compile Remove="PrinterInventory.cs" />
+    <Compile Remove="PdfiumNative.cs" />
+    <Compile Remove="PdfiumPrintEngine.cs" />
+    <Compile Remove="Win32SpoolerStatusSource.cs" />
+    <Compile Remove="Win32SpoolerJobController.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <!-- Hanya biner native yang dipakai; binding C# ditulis dengan LibraryImport agar
+         jalur interop tetap terlihat dan dapat dianalisis Native AOT. -->
+    <PackageReference Include="bblanchon.PDFium.Win32" Version="157.0.8100" />
     <PackageReference Include="Microsoft.Windows.CsWin32" Version="0.3.367">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>

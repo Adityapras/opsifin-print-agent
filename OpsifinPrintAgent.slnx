@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Agent.Hub/Agent.Hub.csproj" />
     <Project Path="src/Agent.Printing/Agent.Printing.csproj" />
+    <Project Path="src/Agent.Runtime/Agent.Runtime.csproj" />
     <Project Path="src/Agent.Service/Agent.Service.csproj" />
   </Folder>
   <Folder Name="/tests/">

@@ -26,8 +26,6 @@ public sealed record PortInfo(string Name, string? MonitorName, string? Descript
 
 public static class PrinterInventory
 {
-    private const int ErrorInsufficientBuffer = 122;
-
     // LOCAL mencakup printer per mesin (termasuk koneksi hasil `printui /ga`), CONNECTIONS
     // mencakup koneksi jaringan per user. Keduanya diminta supaya B2 bisa membandingkan apa
     // yang hilang saat agent jalan sebagai LocalSystem dibanding sebagai user.
@@ -132,12 +130,18 @@ public static class PrinterInventory
                 }
 
                 var error = Marshal.GetLastPInvokeError();
-                if (error != ErrorInsufficientBuffer)
+
+                // EnumPorts dari metadata CsWin32 tidak mempertahankan LastError, tetapi tetap
+                // mengisi `needed` sesuai kontrak Win32. Memercayai ukuran yang bertambah juga
+                // menangani perubahan daftar printer di antara probe dan pembacaan tanpa
+                // menganggap LastError lama dari P/Invoke lain sebagai kegagalan baru.
+                if (needed > buffer.Length)
                 {
-                    throw new Win32Exception(error, $"{api} gagal");
+                    buffer = new byte[needed];
+                    continue;
                 }
 
-                buffer = new byte[needed];
+                throw new Win32Exception(error, $"{api} gagal");
             }
         }
     }

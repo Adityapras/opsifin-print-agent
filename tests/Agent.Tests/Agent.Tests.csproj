@@ -18,6 +18,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Agent.Hub\Agent.Hub.csproj" />
+    <ProjectReference Include="..\..\src\Agent.Printing\Agent.Printing.csproj" />
+    <ProjectReference Include="..\..\src\Agent.Runtime\Agent.Runtime.csproj" />
   </ItemGroup>
 
 </Project>
