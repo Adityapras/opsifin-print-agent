@@ -37,3 +37,10 @@ or separate release manifest. Windows may show an unknown-publisher warning duri
 Update Print Hub according to `docs/HUB-HANDOFF-OTA-UPDATES.md`, then perform one clean end-to-end
 test: uninstall the old Agent, clear its old local state, delete/revoke the old Hub Agent record,
 install `1.0.0`, pair from the GUI, print in simulation mode, and publish a small `1.0.1` update.
+
+## OTA verification build
+
+- Version `1.0.1` changes the Agent Control subtitle to **Windows print control center with safe
+  updates**, providing a visible confirmation after OTA succeeds.
+- All 103 automated tests passed before packaging.
+- MSI SHA-256: `56074974c70316b6f6128371d8b8b8a30f7b79a0cc87046baf31f482ca3f4efe`.
