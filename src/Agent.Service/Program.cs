@@ -1,5 +1,6 @@
 using Agent.Service;
 using Agent.Hub;
+using Agent.Local;
 using Agent.Printing;
 using Agent.Runtime;
 using Microsoft.Extensions.Hosting.WindowsServices;
@@ -10,7 +11,7 @@ if (args.Contains("--list-printers"))
 {
     var report = PrinterReport.Build("console");
     Console.WriteLine(report);
-    Console.WriteLine($"Laporan disimpan di {PrinterReport.Save(report)}");
+    Console.WriteLine($"The report was saved to {PrinterReport.Save(report)}");
     return;
 }
 
@@ -27,20 +28,31 @@ if (args.Length > 0 && string.Equals(args[0], "print-file", StringComparison.Ord
 }
 
 var builder = Host.CreateApplicationBuilder(args);
+var localRuntimeSettings = await LoadLocalRuntimeSettingsAsync();
 var executionOptions = new AgentExecutionOptions(
-    builder.Configuration.GetValue("Agent:SimulationMode", false));
+    localRuntimeSettings?.SimulationMode
+        ?? builder.Configuration.GetValue("Agent:SimulationMode", false));
 builder.Logging.AddProvider(new JsonFileLoggerProvider(AgentStatePaths.LogDirectory, TimeProvider.System));
 
 // Saat dijalankan oleh Service Control Manager, host memakai lifetime Windows service
 // dan log ke Event Log; saat dijalankan dari console (dev), perilakunya biasa.
-builder.Services.AddWindowsService(options => options.ServiceName = "Opsifin Print Agent");
+builder.Services.AddWindowsService(options => options.ServiceName = AgentProduct.ServiceDisplayName);
 builder.Services.AddSingleton(new HttpClient
 {
     Timeout = TimeSpan.FromSeconds(30),
 });
+builder.Services.AddSingleton(new AgentUpdateHttpClient(new HttpClient
+{
+    // Paket MSI jauh lebih besar daripada heartbeat/PDF metadata; timeout terpisah mencegah
+    // koneksi client yang lambat menggagalkan update sehat setelah 30 detik.
+    Timeout = TimeSpan.FromMinutes(15),
+}));
 builder.Services.AddSingleton<AgentHubClient>();
 builder.Services.AddSingleton<SignedDocumentDownloader>();
 builder.Services.AddSingleton<DeviceIdentityStore>();
+builder.Services.AddSingleton<AgentHealthStore>();
+builder.Services.AddSingleton<AgentUpdateStore>();
+builder.Services.AddSingleton<AgentHealthPublisher>();
 builder.Services.AddSingleton(_ => new EventOutbox(AgentStatePaths.OutboxDatabase));
 builder.Services.AddSingleton<EventOutboxDispatcher>();
 builder.Services.AddSingleton(TimeProvider.System);
@@ -62,8 +74,8 @@ else
 builder.Services.AddSingleton<SpoolerJobMonitor>();
 builder.Services.AddSingleton(new JobProcessorOptions(
     AgentStatePaths.DocumentsDirectory,
-    TimeSpan.FromSeconds(60),
-    TimeSpan.FromSeconds(1)));
+    executionOptions.SimulationMode ? TimeSpan.Zero : TimeSpan.FromSeconds(60),
+    executionOptions.SimulationMode ? TimeSpan.FromMilliseconds(100) : TimeSpan.FromSeconds(1)));
 builder.Services.AddSingleton(new PrintJobJournal(AgentStatePaths.PrintJournalDirectory));
 builder.Services.AddSingleton(new CommandJournal(AgentStatePaths.CommandJournalDirectory));
 builder.Services.AddSingleton(new AgentLogArchiveOptions(
@@ -78,7 +90,24 @@ builder.Services.AddSingleton<TestPagePrinter>();
 builder.Services.AddSingleton<JobProcessor>();
 builder.Services.AddSingleton<JobCoordinator>();
 builder.Services.AddSingleton<AgentCommandHandler>();
+builder.Services.AddSingleton<AgentUpdateCoordinator>();
 builder.Services.AddHostedService<Worker>();
+builder.Services.AddHostedService(provider => provider.GetRequiredService<AgentUpdateCoordinator>());
 
 var host = builder.Build();
 host.Run();
+
+static async Task<AgentRuntimeSettings?> LoadLocalRuntimeSettingsAsync()
+{
+    try
+    {
+        return await new AgentRuntimeSettingsStore().LoadAsync(CancellationToken.None);
+    }
+    catch (Exception ex)
+    {
+        // File lokal yang rusak tidak boleh diam-diam mengaktifkan simulasi. Production dari
+        // appsettings menjadi fallback aman dan detail kerusakan tetap masuk ke bootstrap log.
+        Console.Error.WriteLine($"Local runtime settings could not be read: {ex.Message}");
+        return null;
+    }
+}

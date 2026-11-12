@@ -59,7 +59,7 @@ public sealed class TestPagePrinter(
             return new TestPageResult(
                 monitorResult.Outcome,
                 submission.SpoolerJobId,
-                monitorResult.Detail ?? "Pemantauan spooler selesai.");
+                monitorResult.Detail ?? "Spooler monitoring completed.");
         }
         catch (OperationCanceledException) when (spoolerJobId is not null)
         {
@@ -87,7 +87,7 @@ public static class TestPagePdfDocument
             $"Agent ID: {agentId:D}",
             $"Printer: {NormalizeText(printerName)}",
             $"Generated: {generatedAt:yyyy-MM-dd HH:mm:ss zzz}",
-            "Jika halaman ini tercetak, jalur PDFium, GDI, dan Windows spooler aktif.",
+            "If this page is printed, the PDFium, GDI, and Windows spooler pipeline is working.",
         };
         var content = new StringBuilder("BT\n/F1 22 Tf\n72 760 Td\n");
         for (var index = 0; index < lines.Length; index++)

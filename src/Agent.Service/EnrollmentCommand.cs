@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using Agent.Hub;
+using Agent.Local;
 
 namespace Agent.Service;
 
@@ -12,20 +13,20 @@ internal static class EnrollmentCommand
         if (hubUrl is null || pairingCode is null)
         {
             Console.Error.WriteLine(
-                "Pemakaian: Agent.Service.exe enroll --hub-url <URL> --pairing-code <8-karakter>");
+                "Usage: Agent.Service.exe enroll --hub-url <URL> --pairing-code <8-characters>");
             return 2;
         }
 
         if (pairingCode.Length != 8)
         {
-            Console.Error.WriteLine("Pairing code harus tepat 8 karakter.");
+            Console.Error.WriteLine("The pairing code must contain exactly 8 characters.");
             return 2;
         }
 
         var store = new DeviceIdentityStore();
         if (store.Exists)
         {
-            Console.Error.WriteLine($"Agent sudah di-enroll. Identity tersimpan di {store.Path}");
+            Console.Error.WriteLine($"The agent is already enrolled. Its identity is stored at {store.Path}");
             return 3;
         }
 
@@ -40,7 +41,7 @@ internal static class EnrollmentCommand
                     pairingCode,
                     Environment.MachineName,
                     RuntimeInformation.OSDescription,
-                    AgentMetadata.Version,
+                    AgentProduct.Version,
                     MachineIdentity.ReadMachineGuid()),
                 CancellationToken.None);
             await store.SaveAsync(
@@ -52,19 +53,19 @@ internal static class EnrollmentCommand
                     response.DeviceSecret),
                 CancellationToken.None);
 
-            Console.WriteLine($"Enrollment berhasil. Agent ID: {response.AgentId}");
-            Console.WriteLine($"Identity terenkripsi tersimpan di {store.Path}");
+            Console.WriteLine($"Enrollment completed successfully. Agent ID: {response.AgentId}");
+            Console.WriteLine($"The encrypted identity is stored at {store.Path}");
             return 0;
         }
         catch (AgentApiException ex)
         {
             Console.Error.WriteLine(
-                $"Enrollment ditolak Hub: HTTP {(int?)ex.StatusCode} {ex.ErrorCode} - {ex.Message}");
+                $"Enrollment was rejected by the Hub: HTTP {(int?)ex.StatusCode} {ex.ErrorCode} - {ex.Message}");
             return 4;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Enrollment gagal: {ex.Message}");
+            Console.Error.WriteLine($"Enrollment failed: {ex.Message}");
             return 5;
         }
     }

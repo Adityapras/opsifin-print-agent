@@ -97,14 +97,14 @@ public sealed class SpoolerCompletionTracker
         {
             return Result(
                 SpoolerMonitorOutcome.NotObserved,
-                "JobId tidak pernah terlihat di spooler; completion tidak boleh diasumsikan.");
+                "The JobId was never observed in the spooler; completion cannot be assumed.");
         }
 
         if (fatalJobStatusWasObserved)
         {
             return Result(
                 SpoolerMonitorOutcome.Failed,
-                "Job hilang setelah spooler pernah melaporkan ERROR/DELETING/DELETED.");
+                "The job disappeared after the spooler reported ERROR, DELETING, or DELETED.");
         }
 
         disappearedAt ??= observedAt;
@@ -112,14 +112,14 @@ public sealed class SpoolerCompletionTracker
         {
             return Result(
                 SpoolerMonitorOutcome.PrintedUnverified,
-                "Printer melaporkan error dalam jendela verifikasi setelah job hilang.");
+                "The printer reported an error during the verification window after the job disappeared.");
         }
 
         if (observedAt - disappearedAt.Value >= verificationWindow)
         {
             return Result(
                 SpoolerMonitorOutcome.Completed,
-                "Job hilang tanpa error dan printer sehat selama jendela verifikasi.");
+                "The job disappeared without errors and the printer remained healthy throughout the verification window.");
         }
 
         return null;

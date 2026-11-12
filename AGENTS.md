@@ -12,13 +12,15 @@ Prinsip: **agent "bodoh" dan stabil, Hub yang pintar.** Logika bisnis (routing, 
 
 ## Stack
 
-.NET 10 LTS Worker Service (Native AOT) · CsWin32 untuk winspool + GDI · PDFium (belum ditambahkan, Fase 0) · SQLite (`Microsoft.Data.Sqlite`) untuk outbox · DPAPI untuk device secret · installer MSI (WiX, belum dibuat).
+.NET 10 LTS Worker Service (Native AOT) · WPF desktop companion (self-contained) · CsWin32 untuk winspool + GDI · PDFium · SQLite (`Microsoft.Data.Sqlite`) untuk outbox · DPAPI untuk device secret · installer MSI (WiX).
 
 ## Struktur
 
 | Proyek | TFM | Isi |
 | --- | --- | --- |
 | `src/Agent.Service` | `net10.0-windows` | Host Windows service, loop heartbeat/klaim/cetak, outbox SQLite, updater |
+| `src/Agent.Desktop` | `net10.0-windows` | Opsifin Agent Control: pairing GUI, status service/Hub, kontrol service, diagnostics |
+| `src/Agent.Local` | `net10.0-windows` | State lokal bersama: identity DPAPI, ACL ProgramData, MachineGuid, health snapshot |
 | `src/Agent.Printing` | `net10.0-windows` | Inventaris printer, cetak PDF (PDFium → GDI), pemantauan job spooler. API Win32 didaftarkan di `NativeMethods.txt` |
 | `src/Agent.Hub` | `net10.0` | Klien HTTP untuk `/agent/v1`; bebas Windows supaya bisa dites di Linux |
 | `tests/Agent.Tests` | `net10.0` | Test unit dan kontrak; jalan di Linux/CI |
@@ -31,7 +33,9 @@ Di Windows dengan .NET 10 SDK:
 dotnet build
 dotnet test
 dotnet run --project src/Agent.Service           # mode console
+dotnet run --project src/Agent.Desktop           # GUI, meminta UAC
 dotnet publish src/Agent.Service -c Release -r win-x64   # Native AOT, wajib di Windows
+dotnet publish src/Agent.Desktop -c Release -r win-x64   # WPF self-contained
 ```
 
 Di WSL/Linux (tanpa SDK lokal), lewat container:
@@ -41,6 +45,10 @@ docker run --rm -u $(id -u):$(id -g) -e HOME=/tmp -v $PWD:/src -w /src mcr.micro
 ```
 
 Build di Linux bisa (`EnableWindowsTargeting`), tetapi **menjalankan agent, mencetak, dan publish AOT butuh Windows** dengan printer nyata.
+
+`Agent.Service` tetap headless karena Windows service berjalan di Session 0. Jangan menambahkan
+window atau dialog ke service. Semua interaksi lokal masuk `Agent.Desktop`; routing, retry,
+jadwal, dan konfigurasi bisnis tetap hanya berasal dari Hub.
 
 ## Kontrak dengan Hub
 

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Agent.Hub;
 
@@ -39,7 +40,16 @@ public sealed record HeartbeatRequest(
     DateTimeOffset AgentTime,
     long ConfigVersion,
     IReadOnlyList<string> Capabilities,
-    IReadOnlyList<PrinterReportDto> Printers);
+    IReadOnlyList<PrinterReportDto> Printers,
+    AgentUpdateHeartbeat? Update = null);
+
+public sealed record AgentUpdateHeartbeat(
+    Guid CommandId,
+    string TargetVersion,
+    string Status,
+    int ProgressPercent,
+    string? Message,
+    DateTimeOffset UpdatedAt);
 
 public sealed record HeartbeatResponse(
     DateTimeOffset ServerTime,
@@ -53,6 +63,8 @@ public sealed class AgentConfig
 
     public int HeartbeatIntervalS { get; init; } = 30;
 
+    public int? SourcePollIntervalS { get; init; }
+
     public string LogLevel { get; init; } = "info";
 
     public IReadOnlyList<PrinterBinding> Printers { get; init; } = [];
@@ -60,6 +72,7 @@ public sealed class AgentConfig
 
 public sealed record PrinterBinding(Guid PrinterId, string WindowsName, PrintSettings? Print);
 
+[JsonConverter(typeof(PrintSettingsJsonConverter))]
 public sealed class PrintSettings
 {
     public string Engine { get; init; } = "pdfium";
@@ -71,6 +84,9 @@ public sealed class PrintSettings
     public string? Tray { get; init; }
 
     public string Scale { get; init; } = "noscale";
+
+    [JsonIgnore]
+    public IReadOnlyList<string> NormalizationWarnings { get; init; } = [];
 }
 
 public sealed record AgentCommand(Guid Id, string Type, JsonElement? Args);
@@ -87,7 +103,13 @@ public sealed record ClaimedJob(
     Guid PrinterId,
     DateTimeOffset LeaseUntil,
     ClaimedDocument Document,
-    PrintSettings Print);
+    PrintSettings Print,
+    JobDisplay? Display = null);
+
+public sealed record JobDisplay(
+    string InvoiceNo,
+    string ItemType,
+    DateTimeOffset? ReceivedAt);
 
 public sealed record ClaimedDocument(
     Uri Url,

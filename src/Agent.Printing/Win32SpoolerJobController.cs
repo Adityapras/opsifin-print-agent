@@ -20,7 +20,7 @@ public sealed class Win32SpoolerJobController : ISpoolerJobController
 
         if (!PInvoke.OpenPrinter(printerName, out var printerHandle, null))
         {
-            throw new Win32Exception(Marshal.GetLastPInvokeError(), $"OpenPrinter gagal untuk '{printerName}'");
+            throw new Win32Exception(Marshal.GetLastPInvokeError(), $"OpenPrinter failed for '{printerName}'");
         }
 
         using (printerHandle)
@@ -32,7 +32,7 @@ public sealed class Win32SpoolerJobController : ISpoolerJobController
                 // Job yang sudah hilang tidak lagi membutuhkan pembatalan.
                 if (error != 87)
                 {
-                    throw new Win32Exception(error, $"SetJob DELETE gagal untuk JobId {spoolerJobId}");
+                    throw new Win32Exception(error, $"SetJob DELETE failed for JobId {spoolerJobId}");
                 }
             }
         }

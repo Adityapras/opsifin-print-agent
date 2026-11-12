@@ -94,6 +94,90 @@ public class AgentHubClientTests
     }
 
     [Fact]
+    public async Task Heartbeat_melaporkan_lifecycle_update_dengan_nama_field_kontrak()
+    {
+        var commandId = Guid.CreateVersion7();
+        var updatedAt = DateTimeOffset.Parse("2026-11-10T08:30:00Z");
+        var handler = new StubHandler(async request =>
+        {
+            var json = await request.Content!.ReadAsStringAsync();
+            Assert.Contains($"\"command_id\":\"{commandId}\"", json);
+            Assert.Contains("\"target_version\":\"0.3.10\"", json);
+            Assert.Contains("\"status\":\"downloading\"", json);
+            Assert.Contains("\"progress_percent\":42", json);
+            return JsonResponse(HttpStatusCode.OK, """
+                {"server_time":"2026-11-10T08:30:00Z","config_version":1}
+                """);
+        });
+        var client = new AgentHubClient(new HttpClient(handler));
+
+        await client.HeartbeatAsync(
+            AgentHubClient.NormalizeBaseAddress("https://hub.example"),
+            "agent.secret",
+            "0.3.8",
+            new HeartbeatRequest(
+                "0.3.8",
+                1,
+                updatedAt,
+                1,
+                [],
+                [],
+                new AgentUpdateHeartbeat(
+                    commandId,
+                    "0.3.10",
+                    "downloading",
+                    42,
+                    "Downloading update package.",
+                    updatedAt)),
+            CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task Heartbeat_menormalkan_print_settings_null_tanpa_memutus_koneksi()
+    {
+        var printerId = Guid.CreateVersion7();
+        var handler = new StubHandler(_ => Task.FromResult(JsonResponse(HttpStatusCode.OK, $$"""
+            {
+              "server_time":"2026-11-05T08:00:00Z",
+              "config_version":9,
+              "config":{
+                "claim_interval_s":5,
+                "heartbeat_interval_s":30,
+                "source_poll_interval_s":45,
+                "printers":[{
+                  "printer_id":"{{printerId}}",
+                  "windows_name":"Fax",
+                  "print":{
+                    "engine":"pdfium",
+                    "copies":null,
+                    "duplex":false,
+                    "tray":null,
+                    "scale":null
+                  }
+                }]
+              }
+            }
+            """)));
+        var client = new AgentHubClient(new HttpClient(handler));
+
+        var response = await client.HeartbeatAsync(
+            AgentHubClient.NormalizeBaseAddress("https://hub.example"),
+            "agent.secret",
+            "0.3.1",
+            new HeartbeatRequest("0.3.1", 1, DateTimeOffset.UtcNow, 8, [], []),
+            CancellationToken.None);
+
+        Assert.NotNull(response.Config);
+        Assert.Equal(45, response.Config.SourcePollIntervalS);
+        var print = Assert.Single(response.Config.Printers).Print;
+        Assert.NotNull(print);
+        Assert.Equal(1, print.Copies);
+        Assert.Equal("noscale", print.Scale);
+        Assert.Contains(print.NormalizationWarnings, warning => warning.StartsWith("copies", StringComparison.Ordinal));
+        Assert.Contains(print.NormalizationWarnings, warning => warning.StartsWith("scale", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Error_hub_mempertahankan_status_dan_kode()
     {
         var handler = new StubHandler(_ => Task.FromResult(JsonResponse(
@@ -174,6 +258,11 @@ public class AgentHubClientTests
                     "attempt_id":"{{attemptId}}",
                     "printer_id":"{{printerId}}",
                     "lease_until":"2026-10-27T09:00:00Z",
+                    "display":{
+                      "invoice_no":"INV-2026-0001",
+                      "item_type":"INVOICE",
+                      "received_at":"2026-10-27T08:55:00Z"
+                    },
                     "document":{
                       "url":"https://hub.example/agent/v1/documents/doc?signature=x&expires=1",
                       "sha256":"{{new string('a', 64)}}",
@@ -198,6 +287,43 @@ public class AgentHubClientTests
         Assert.Equal(attemptId, job.AttemptId);
         Assert.Equal(2, job.Document.Pages);
         Assert.Equal("pdfium", job.Print.Engine);
+        Assert.Equal("INV-2026-0001", job.Display?.InvoiceNo);
+        Assert.Equal("INVOICE", job.Display?.ItemType);
+    }
+
+    [Fact]
+    public async Task Claim_dari_hub_lama_tetap_berfungsi_tanpa_display_metadata()
+    {
+        var printerId = Guid.CreateVersion7();
+        var handler = new StubHandler(_ => Task.FromResult(JsonResponse(HttpStatusCode.OK, $$"""
+            {
+              "jobs":[{
+                "job_id":"{{Guid.CreateVersion7()}}",
+                "attempt_id":"{{Guid.CreateVersion7()}}",
+                "printer_id":"{{printerId}}",
+                "lease_until":"2026-11-05T10:00:00Z",
+                "document":{
+                  "url":"https://hub.example/agent/v1/documents/doc?signature=x&expires=1",
+                  "sha256":"{{new string('b', 64)}}",
+                  "pages":1,
+                  "size_bytes":10
+                },
+                "print":{}
+              }]
+            }
+            """)));
+        var client = new AgentHubClient(new HttpClient(handler));
+
+        var job = Assert.Single(await client.ClaimJobsAsync(
+            AgentHubClient.NormalizeBaseAddress("https://hub.example"),
+            "agent.secret",
+            "0.3.1",
+            [printerId],
+            CancellationToken.None));
+
+        Assert.Null(job.Display);
+        Assert.Equal(1, job.Print.Copies);
+        Assert.Equal("noscale", job.Print.Scale);
     }
 
     [Fact]

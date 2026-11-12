@@ -5,6 +5,8 @@
 
 # dotenv files
 .env
+.env.*
+!.env.example
 
 # User-specific files
 *.rsuser
@@ -64,6 +66,7 @@ BenchmarkDotNet.Artifacts/
 project.lock.json
 project.fragment.lock.json
 artifacts/
+dist/
 
 # Tye
 .tye/
@@ -245,6 +248,12 @@ ClientBin/
 *.dbproj.schemaview
 *.jfm
 *.pfx
+*.p12
+*.pem
+*.key
+*.cer
+*.crt
+*.release.json
 *.publishsettings
 orleans.codegen.cs
 
@@ -374,6 +383,10 @@ ASALocalRun/
 
 # BeatPulse healthcheck temp database
 healthchecksdb
+*.db
+*.sqlite
+*.sqlite3
+diagnostics-*.zip
 
 # Backup folder for Package Reference Convert tool in Visual Studio 2017
 MigrationBackup/

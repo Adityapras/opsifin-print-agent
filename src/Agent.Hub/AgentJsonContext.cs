@@ -9,6 +9,7 @@ namespace Agent.Hub;
 [JsonSerializable(typeof(EnrollRequest))]
 [JsonSerializable(typeof(EnrollResponse))]
 [JsonSerializable(typeof(HeartbeatRequest))]
+[JsonSerializable(typeof(AgentUpdateHeartbeat))]
 [JsonSerializable(typeof(HeartbeatResponse))]
 [JsonSerializable(typeof(ClaimJobsRequest))]
 [JsonSerializable(typeof(ClaimJobsResponse))]

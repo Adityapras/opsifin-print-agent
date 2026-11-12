@@ -3,11 +3,26 @@
   <PropertyGroup>
     <OutputName>OpsifinPrintAgent</OutputName>
     <Platform>x64</Platform>
-    <AgentPublishDir Condition="'$(AgentPublishDir)' == ''">$(MSBuildThisFileDirectory)..\artifacts\agent-next</AgentPublishDir>
-    <DefineConstants>AgentPublishDir=$(AgentPublishDir)</DefineConstants>
+    <AgentPublishDir Condition="'$(AgentPublishDir)' == ''">$(MSBuildThisFileDirectory)..\artifacts\package\agent</AgentPublishDir>
+    <ControlPublishDir Condition="'$(ControlPublishDir)' == ''">$(MSBuildThisFileDirectory)..\artifacts\package\control</ControlPublishDir>
+    <UpdaterPublishDir Condition="'$(UpdaterPublishDir)' == ''">$(MSBuildThisFileDirectory)..\artifacts\package\updater</UpdaterPublishDir>
+    <BrandAssetsDir Condition="'$(BrandAssetsDir)' == ''">$(MSBuildThisFileDirectory)..\assets\branding</BrandAssetsDir>
+    <DistributionDir Condition="'$(DistributionDir)' == ''">$(MSBuildThisFileDirectory)..\dist</DistributionDir>
+    <DefineConstants>AgentPublishDir=$(AgentPublishDir);ControlPublishDir=$(ControlPublishDir);UpdaterPublishDir=$(UpdaterPublishDir);BrandAssetsDir=$(BrandAssetsDir);ProductVersion=$(Version)</DefineConstants>
     <!-- e_sqlite3.dll tidak memiliki version resource; ICE60 tidak relevan untuk
          native dependency yang selalu diganti bersama executable agent. -->
     <SuppressIces>ICE60</SuppressIces>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="WixToolset.Util.wixext" Version="6.0.2" />
+  </ItemGroup>
+
+  <Target Name="CreateSingleFileDistribution" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+    <MakeDir Directories="$(DistributionDir)" />
+    <Copy
+      SourceFiles="$(TargetPath)"
+      DestinationFiles="$(DistributionDir)\OpsifinPrintAgent-Setup-$(Version)-win-x64.msi" />
+  </Target>
 
 </Project>

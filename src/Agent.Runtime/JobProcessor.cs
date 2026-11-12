@@ -16,9 +16,19 @@ public sealed class JobProcessor(
     JobProcessorOptions options,
     TimeProvider timeProvider)
 {
+    public Task<JobProcessResult> ProcessAsync(
+        ClaimedJob job,
+        string windowsPrinterName,
+        CancellationToken cancellationToken) => ProcessAsync(
+            job,
+            windowsPrinterName,
+            progressReporter: null,
+            cancellationToken);
+
     public async Task<JobProcessResult> ProcessAsync(
         ClaimedJob job,
         string windowsPrinterName,
+        Func<JobProgressUpdate, CancellationToken, Task>? progressReporter,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(windowsPrinterName);
@@ -34,9 +44,13 @@ public sealed class JobProcessor(
             if (!string.Equals(job.Print.Engine, "pdfium", StringComparison.OrdinalIgnoreCase))
             {
                 throw new NotSupportedException(
-                    $"Print engine '{job.Print.Engine}' belum didukung build agent ini.");
+                    $"Print engine '{job.Print.Engine}' is not supported by this agent build.");
             }
 
+            await TryReportProgressAsync(
+                progressReporter,
+                new JobProgressUpdate(JobProgressStages.Downloading),
+                cancellationToken);
             await EnqueueAsync(
                 job,
                 "download_started",
@@ -56,6 +70,10 @@ public sealed class JobProcessor(
                 RuntimeJsonContext.Default.DownloadCompletedData,
                 cancellationToken);
 
+            await TryReportProgressAsync(
+                progressReporter,
+                new JobProgressUpdate(JobProgressStages.SendingToPrinter),
+                cancellationToken);
             submission = await printEngine.SubmitAsync(
                 new PrintRequest(
                     document.Path,
@@ -72,7 +90,7 @@ public sealed class JobProcessor(
             if (submission.PageCount != expectedPages)
             {
                 throw new InvalidDataException(
-                    $"Engine mengirim {submission.PageCount} halaman, claim mengharapkan {expectedPages}.");
+                    $"The engine submitted {submission.PageCount} pages, but the claim expects {expectedPages}.");
             }
 
             await journal.SaveAsync(
@@ -85,6 +103,11 @@ public sealed class JobProcessor(
                 cancellationToken);
             journalSaved = true;
 
+            await TryReportProgressAsync(
+                progressReporter,
+                new JobProgressUpdate(JobProgressStages.Printing, submission.SpoolerJobId),
+                cancellationToken);
+
             await EnqueueAsync(
                 job,
                 "spooled",
@@ -92,24 +115,42 @@ public sealed class JobProcessor(
                 RuntimeJsonContext.Default.SpooledData,
                 cancellationToken);
 
+            var verificationReported = false;
             var monitorResult = await spoolerMonitor.MonitorAsync(
                 windowsPrinterName,
                 submission.SpoolerJobId,
-                (observation, token) => EnqueueAsync(
-                    job,
-                    "spooler_status",
-                    new SpoolerStatusData(
-                        submission.SpoolerJobId,
-                        observation.JobExists,
-                        observation.JobStatus,
-                        observation.PrinterStatus,
-                        observation.PagesPrinted,
-                        observation.TotalPages,
-                        observation.StatusText),
-                    RuntimeJsonContext.Default.SpoolerStatusData,
-                    token),
+                async (observation, token) =>
+                {
+                    if (!observation.JobExists && !verificationReported)
+                    {
+                        verificationReported = true;
+                        await TryReportProgressAsync(
+                            progressReporter,
+                            new JobProgressUpdate(
+                                JobProgressStages.VerifyingCompletion,
+                                submission.SpoolerJobId),
+                            token);
+                    }
+
+                    await EnqueueAsync(
+                        job,
+                        "spooler_status",
+                        new SpoolerStatusData(
+                            submission.SpoolerJobId,
+                            observation.JobExists,
+                            observation.JobStatus,
+                            observation.PrinterStatus,
+                            observation.PagesPrinted,
+                            observation.TotalPages,
+                            observation.StatusText),
+                        RuntimeJsonContext.Default.SpoolerStatusData,
+                        token);
+                },
                 pollInterval: options.SpoolerPollInterval,
                 verificationWindow: options.CompletionVerificationWindow,
+                // StartDoc/EndDoc yang mengembalikan JobId membuktikan job pernah masuk
+                // spooler, meskipun printer cepat sudah menghapusnya sebelum poll pertama.
+                jobWasPreviouslyObserved: true,
                 cancellationToken: cancellationToken);
 
             return await CompleteFromMonitorAsync(job, submission.SpoolerJobId, monitorResult, cancellationToken);
@@ -128,7 +169,7 @@ public sealed class JobProcessor(
                 JobProcessOutcome.Aborted,
                 submission?.SpoolerJobId,
                 null,
-                "Pekerjaan dihentikan sebelum selesai.");
+                "The job was stopped before completion.");
         }
         catch (Exception ex)
         {
@@ -156,18 +197,32 @@ public sealed class JobProcessor(
         }
     }
 
+    public Task<JobProcessResult> ResumeAsync(
+        ClaimedJob job,
+        ActivePrintRecord record,
+        CancellationToken cancellationToken) => ResumeAsync(
+            job,
+            record,
+            progressReporter: null,
+            cancellationToken);
+
     public async Task<JobProcessResult> ResumeAsync(
         ClaimedJob job,
         ActivePrintRecord record,
+        Func<JobProgressUpdate, CancellationToken, Task>? progressReporter,
         CancellationToken cancellationToken)
     {
         if (record.JobId != job.JobId)
         {
-            throw new InvalidOperationException("Jurnal spool tidak cocok dengan job claim.");
+            throw new InvalidOperationException("The spool journal does not match the claimed job.");
         }
 
         try
         {
+            await TryReportProgressAsync(
+                progressReporter,
+                new JobProgressUpdate(JobProgressStages.Printing, record.SpoolerJobId),
+                cancellationToken);
             // Event baru untuk attempt lease saat ini memberi Hub konteks JobId spooler lama
             // tanpa mengirim PDF yang sama untuk kedua kalinya.
             await EnqueueAsync(
@@ -176,22 +231,37 @@ public sealed class JobProcessor(
                 new SpooledData(record.SpoolerJobId, record.PageCount),
                 RuntimeJsonContext.Default.SpooledData,
                 cancellationToken);
+            var verificationReported = false;
             var monitorResult = await spoolerMonitor.MonitorAsync(
                 record.WindowsPrinterName,
                 record.SpoolerJobId,
-                (observation, token) => EnqueueAsync(
-                    job,
-                    "spooler_status",
-                    new SpoolerStatusData(
-                        record.SpoolerJobId,
-                        observation.JobExists,
-                        observation.JobStatus,
-                        observation.PrinterStatus,
-                        observation.PagesPrinted,
-                        observation.TotalPages,
-                        observation.StatusText),
-                    RuntimeJsonContext.Default.SpoolerStatusData,
-                    token),
+                async (observation, token) =>
+                {
+                    if (!observation.JobExists && !verificationReported)
+                    {
+                        verificationReported = true;
+                        await TryReportProgressAsync(
+                            progressReporter,
+                            new JobProgressUpdate(
+                                JobProgressStages.VerifyingCompletion,
+                                record.SpoolerJobId),
+                            token);
+                    }
+
+                    await EnqueueAsync(
+                        job,
+                        "spooler_status",
+                        new SpoolerStatusData(
+                            record.SpoolerJobId,
+                            observation.JobExists,
+                            observation.JobStatus,
+                            observation.PrinterStatus,
+                            observation.PagesPrinted,
+                            observation.TotalPages,
+                            observation.StatusText),
+                        RuntimeJsonContext.Default.SpoolerStatusData,
+                        token);
+                },
                 pollInterval: options.SpoolerPollInterval,
                 verificationWindow: options.CompletionVerificationWindow,
                 jobWasPreviouslyObserved: true,
@@ -212,7 +282,7 @@ public sealed class JobProcessor(
                 JobProcessOutcome.Aborted,
                 record.SpoolerJobId,
                 null,
-                "Pekerjaan pemulihan dihentikan.");
+                "The recovered job was stopped.");
         }
         catch (Exception ex)
         {
@@ -235,6 +305,30 @@ public sealed class JobProcessor(
         }
     }
 
+    private static async Task TryReportProgressAsync(
+        Func<JobProgressUpdate, CancellationToken, Task>? progressReporter,
+        JobProgressUpdate update,
+        CancellationToken cancellationToken)
+    {
+        if (progressReporter is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await progressReporter(update, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Pembatalan job akan ditangani jalur utama; snapshot UI tidak boleh mengubah hasilnya.
+        }
+        catch
+        {
+            // Status lokal bersifat observabilitas dan tidak boleh menggagalkan pencetakan.
+        }
+    }
+
     private async Task<JobProcessResult> CompleteFromMonitorAsync(
         ClaimedJob job,
         uint spoolerJobId,
@@ -254,7 +348,7 @@ public sealed class JobProcessor(
             await EnqueueAsync(
                 job,
                 eventType,
-                new PrintErrorData("SPOOLER_FAILED", monitor.Detail ?? "Spooler gagal."),
+                new PrintErrorData("SPOOLER_FAILED", monitor.Detail ?? "The spooler failed."),
                 RuntimeJsonContext.Default.PrintErrorData,
                 cancellationToken);
             return new JobProcessResult(
@@ -301,11 +395,12 @@ public sealed class JobProcessor(
         "noscale" => PrintScaleMode.NoScale,
         "fit" => PrintScaleMode.Fit,
         "shrink" => PrintScaleMode.Shrink,
-        _ => throw new InvalidDataException($"Mode skala '{value}' tidak dikenal."),
+        _ => throw new InvalidDataException($"Scale mode '{value}' is not recognized."),
     };
 
     private static string ClassifyError(Exception exception) => exception switch
     {
+        UnattendedPrintingNotSupportedException => "PRINTER_REQUIRES_INTERACTION",
         InvalidDataException => "PDF_INVALID",
         FileNotFoundException => "FILE_NOT_FOUND",
         NotSupportedException => "PRINT_SETTINGS_UNSUPPORTED",

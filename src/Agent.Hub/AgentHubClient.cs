@@ -154,13 +154,13 @@ public sealed class AgentHubClient(HttpClient httpClient)
     {
         if (!Uri.TryCreate(value, UriKind.Absolute, out var uri))
         {
-            throw new ArgumentException("URL Hub harus berupa URL absolut.", nameof(value));
+            throw new ArgumentException("The Hub URL must be an absolute URL.", nameof(value));
         }
 
         if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
             && !(string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) && uri.IsLoopback))
         {
-            throw new ArgumentException("URL Hub wajib HTTPS; HTTP hanya boleh untuk loopback saat pengembangan.", nameof(value));
+            throw new ArgumentException("The Hub URL must use HTTPS; HTTP is allowed only for loopback during development.", nameof(value));
         }
 
         var builder = new UriBuilder(uri)
@@ -190,7 +190,7 @@ public sealed class AgentHubClient(HttpClient httpClient)
 
         await using var body = await response.Content.ReadAsStreamAsync(cancellationToken);
         var result = await JsonSerializer.DeserializeAsync(body, typeInfo, cancellationToken);
-        return result ?? throw new InvalidDataException("Hub mengembalikan body JSON kosong.");
+        return result ?? throw new InvalidDataException("The Hub returned an empty JSON body.");
     }
 
     private static HttpRequestMessage CreateAuthenticatedRequest(

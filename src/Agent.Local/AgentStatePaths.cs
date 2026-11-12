@@ -1,9 +1,9 @@
 using System.Security.AccessControl;
 using System.Security.Principal;
 
-namespace Agent.Service;
+namespace Agent.Local;
 
-internal static class AgentStatePaths
+public static class AgentStatePaths
 {
     public static string RootDirectory { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
@@ -13,6 +13,16 @@ internal static class AgentStatePaths
     public static string StateDirectory { get; } = Path.Combine(RootDirectory, "state");
 
     public static string IdentityFile { get; } = Path.Combine(StateDirectory, "identity.json");
+
+    public static string HealthFile { get; } = Path.Combine(StateDirectory, "health.json");
+
+    public static string RuntimeSettingsFile { get; } = Path.Combine(StateDirectory, "runtime-settings.json");
+
+    public static string UpdateStateFile { get; } = Path.Combine(StateDirectory, "update-state.json");
+
+    public static string UpdateInstallRequestFile { get; } = Path.Combine(StateDirectory, "update-install-request.json");
+
+    public static string UpdateDirectory { get; } = Path.Combine(StateDirectory, "updates");
 
     public static string OutboxDatabase { get; } = Path.Combine(StateDirectory, "agent.db");
 

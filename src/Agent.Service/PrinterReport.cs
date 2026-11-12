@@ -18,7 +18,7 @@ public static class PrinterReport
     public static string Build(string mode)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("Opsifin Print Agent - spike B2: printer yang terlihat");
+        sb.AppendLine("Opsifin Print Agent - spike B2: visible printers");
         sb.AppendLine($"Waktu   : {DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz}");
         sb.AppendLine($"Mesin   : {Environment.MachineName}");
         sb.AppendLine($"OS      : {RuntimeInformation.OSDescription}");
@@ -34,11 +34,11 @@ public static class PrinterReport
         }
         catch (Exception ex)
         {
-            sb.AppendLine($"GAGAL membaca printer: {ex.Message}");
+            sb.AppendLine($"FAILED to read printers: {ex.Message}");
             return sb.ToString();
         }
 
-        sb.AppendLine($"{printers.Count} printer terlihat");
+        sb.AppendLine($"{printers.Count} printer(s) visible");
         for (var i = 0; i < printers.Count; i++)
         {
             var p = printers[i];
@@ -48,7 +48,7 @@ public static class PrinterReport
             sb.AppendLine($"    atribut : 0x{p.Attributes:X8}: {Join(PrinterFlags.DescribeAttributes(p.Attributes))}");
             foreach (var port in p.Ports)
             {
-                sb.AppendLine($"    port    : {port.Name}  [{port.MonitorName ?? "port tidak ada di mesin ini"}{(port.Description is null ? "" : $" / {port.Description}")}]");
+                sb.AppendLine($"    port    : {port.Name}  [{port.MonitorName ?? "port is not present on this machine"}{(port.Description is null ? "" : $" / {port.Description}")}]");
             }
 
             if (p.Ports.Count == 0)

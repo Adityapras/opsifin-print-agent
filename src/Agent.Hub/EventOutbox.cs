@@ -32,7 +32,7 @@ public sealed class EventOutbox
     public async Task InitializeAsync(CancellationToken cancellationToken)
     {
         var directory = Path.GetDirectoryName(DatabasePath)
-            ?? throw new InvalidOperationException("Path database outbox tidak memiliki direktori.");
+            ?? throw new InvalidOperationException("The outbox database path does not have a directory.");
         Directory.CreateDirectory(directory);
 
         await using var connection = await OpenConnectionAsync(cancellationToken);
@@ -89,7 +89,7 @@ public sealed class EventOutbox
     {
         if (limit is < 1 or > 100)
         {
-            throw new ArgumentOutOfRangeException(nameof(limit), "Batch outbox harus 1 sampai 100 event.");
+            throw new ArgumentOutOfRangeException(nameof(limit), "An outbox batch must contain 1 to 100 events.");
         }
 
         await using var connection = await OpenConnectionAsync(cancellationToken);
@@ -113,7 +113,7 @@ public sealed class EventOutbox
             var jobEvent = JsonSerializer.Deserialize(
                 reader.GetString(1),
                 AgentJsonContext.Default.JobEvent)
-                ?? throw new InvalidDataException("Payload event outbox kosong.");
+                ?? throw new InvalidDataException("The outbox event payload is empty.");
             result.Add(new PendingOutboxEvent(
                 Guid.Parse(reader.GetString(0)),
                 jobEvent,

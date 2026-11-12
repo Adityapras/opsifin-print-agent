@@ -16,7 +16,7 @@ public sealed class SimulatedPrintSystem : IPrintEngine, ISpoolerStatusSource, I
         cancellationToken.ThrowIfCancellationRequested();
         if (!File.Exists(request.DocumentPath))
         {
-            throw new FileNotFoundException("Dokumen simulasi tidak ditemukan.", request.DocumentPath);
+            throw new FileNotFoundException("The simulated document was not found.", request.DocumentPath);
         }
 
         var pages = checked((request.ExpectedPageCount ?? 1) * request.Copies);

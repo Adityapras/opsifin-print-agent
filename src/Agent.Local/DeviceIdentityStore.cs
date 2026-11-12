@@ -1,10 +1,10 @@
-using System.Security.Cryptography;
 using System.Security.AccessControl;
+using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 
-namespace Agent.Service;
+namespace Agent.Local;
 
 public sealed class DeviceIdentity(
     Guid agentId,
@@ -60,7 +60,7 @@ public sealed class DeviceIdentityStore
     {
     }
 
-    internal DeviceIdentityStore(string path)
+    public DeviceIdentityStore(string path)
     {
         Path = path;
     }
@@ -68,6 +68,29 @@ public sealed class DeviceIdentityStore
     public string Path { get; }
 
     public bool Exists => File.Exists(Path);
+
+    public string? ArchiveExisting()
+    {
+        if (!File.Exists(Path))
+        {
+            return null;
+        }
+
+        var identityDirectory = System.IO.Path.GetDirectoryName(Path)
+            ?? throw new InvalidOperationException("The identity file path does not have a directory.");
+        if (string.Equals(identityDirectory, AgentStatePaths.StateDirectory, StringComparison.OrdinalIgnoreCase))
+        {
+            AgentStatePaths.EnsureSecureStateDirectory();
+        }
+
+        var archiveDirectory = System.IO.Path.Combine(identityDirectory, "identity-archive");
+        Directory.CreateDirectory(archiveDirectory);
+        var archivePath = System.IO.Path.Combine(
+            archiveDirectory,
+            $"identity-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}-{Guid.CreateVersion7():N}.json.bak");
+        File.Move(Path, archivePath, overwrite: false);
+        return archivePath;
+    }
 
     public async Task SaveAsync(DeviceIdentity identity, CancellationToken cancellationToken)
     {
@@ -94,7 +117,7 @@ public sealed class DeviceIdentityStore
             Convert.ToBase64String(protectedSecret));
 
         var directory = System.IO.Path.GetDirectoryName(Path)
-            ?? throw new InvalidOperationException("Path identity tidak memiliki direktori.");
+            ?? throw new InvalidOperationException("The identity file path does not have a directory.");
         if (string.Equals(directory, AgentStatePaths.StateDirectory, StringComparison.OrdinalIgnoreCase))
         {
             AgentStatePaths.EnsureSecureStateDirectory();
@@ -103,6 +126,7 @@ public sealed class DeviceIdentityStore
         {
             Directory.CreateDirectory(directory);
         }
+
         var temporaryPath = $"{Path}.{Guid.CreateVersion7():N}.tmp";
         try
         {
@@ -118,7 +142,7 @@ public sealed class DeviceIdentityStore
                 await JsonSerializer.SerializeAsync(
                     stream,
                     stored,
-                    AgentServiceJsonContext.Default.StoredDeviceIdentity,
+                    LocalJsonContext.Default.StoredDeviceIdentity,
                     cancellationToken);
                 await stream.FlushAsync(cancellationToken);
             }
@@ -132,21 +156,6 @@ public sealed class DeviceIdentityStore
                 File.Delete(temporaryPath);
             }
         }
-    }
-
-    private static void RestrictToSystemAndAdministrators(string path)
-    {
-        var security = new FileSecurity();
-        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-        security.AddAccessRule(new FileSystemAccessRule(
-            new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
-            FileSystemRights.FullControl,
-            AccessControlType.Allow));
-        security.AddAccessRule(new FileSystemAccessRule(
-            new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
-            FileSystemRights.FullControl,
-            AccessControlType.Allow));
-        new FileInfo(path).SetAccessControl(security);
     }
 
     public async Task<DeviceIdentity?> LoadAsync(CancellationToken cancellationToken)
@@ -165,9 +174,9 @@ public sealed class DeviceIdentityStore
             FileOptions.Asynchronous | FileOptions.SequentialScan);
         var stored = await JsonSerializer.DeserializeAsync(
             stream,
-            AgentServiceJsonContext.Default.StoredDeviceIdentity,
+            LocalJsonContext.Default.StoredDeviceIdentity,
             cancellationToken)
-            ?? throw new InvalidDataException("File identity kosong.");
+            ?? throw new InvalidDataException("The identity file is empty.");
         var secret = ProtectedData.Unprotect(
             Convert.FromBase64String(stored.ProtectedDeviceSecret),
             Entropy,
@@ -185,5 +194,20 @@ public sealed class DeviceIdentityStore
         {
             CryptographicOperations.ZeroMemory(secret);
         }
+    }
+
+    private static void RestrictToSystemAndAdministrators(string path)
+    {
+        var security = new FileSecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.AddAccessRule(new FileSystemAccessRule(
+            new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+            FileSystemRights.FullControl,
+            AccessControlType.Allow));
+        security.AddAccessRule(new FileSystemAccessRule(
+            new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+            FileSystemRights.FullControl,
+            AccessControlType.Allow));
+        new FileInfo(path).SetAccessControl(security);
     }
 }

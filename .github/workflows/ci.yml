@@ -20,10 +20,11 @@ jobs:
 
       - run: dotnet test -c Release --no-build
 
-      - name: Publish Native AOT
-        run: dotnet publish src/Agent.Service -c Release -r win-x64 -o artifacts/agent
+      - name: Build installer
+        shell: pwsh
+        run: .\tools\build-installer.ps1 -SkipTests
 
       - uses: actions/upload-artifact@v4
         with:
-          name: agent-win-x64
-          path: artifacts/agent
+          name: opsifin-print-agent-msi
+          path: dist/*.msi

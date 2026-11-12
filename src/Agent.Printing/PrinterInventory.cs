@@ -141,7 +141,7 @@ public static class PrinterInventory
                     continue;
                 }
 
-                throw new Win32Exception(error, $"{api} gagal");
+                throw new Win32Exception(error, $"{api} failed");
             }
         }
     }

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Agent.Hub;
+using Agent.Local;
 using Agent.Runtime;
 
 namespace Agent.Service;
@@ -10,12 +11,15 @@ public sealed class JobCoordinator(
     JobProcessor jobProcessor,
     TestPagePrinter testPagePrinter,
     PrintJobJournal journal,
+    AgentHealthPublisher healthPublisher,
     TimeProvider timeProvider)
 {
     private readonly object configGate = new();
+    private readonly SemaphoreSlim claimGate = new(1, 1);
     private readonly ConcurrentDictionary<Guid, ActiveJob> activeByPrinter = new();
     private readonly ConcurrentDictionary<Guid, ActiveJob> activeByJob = new();
     private AgentConfig? config;
+    private bool claimsSuspended;
 
     public bool HasConfiguration
     {
@@ -39,6 +43,8 @@ public sealed class JobCoordinator(
         }
     }
 
+    public int ActivePrintCount => activeByPrinter.Count;
+
     public void UpdateConfiguration(AgentConfig newConfig)
     {
         ArgumentNullException.ThrowIfNull(newConfig);
@@ -57,65 +63,95 @@ public sealed class JobCoordinator(
         IReadOnlySet<string> visiblePrinterNames,
         CancellationToken stoppingToken)
     {
-        var bindings = SnapshotBindings()
-            .Where(binding => visiblePrinterNames.Contains(binding.WindowsName))
-            .Where(binding => !activeByPrinter.ContainsKey(binding.PrinterId))
-            .ToDictionary(binding => binding.PrinterId);
-        if (bindings.Count == 0)
+        await claimGate.WaitAsync(stoppingToken);
+        try
         {
-            return 0;
-        }
-
-        var jobs = await hubClient.ClaimJobsAsync(
-            identity.HubBaseAddress,
-            identity.BearerToken,
-            AgentMetadata.Version,
-            bindings.Keys.ToArray(),
-            stoppingToken);
-        var started = 0;
-        foreach (var job in jobs)
-        {
-            if (!bindings.TryGetValue(job.PrinterId, out var binding))
+            var bindings = SnapshotBindings()
+                .Where(binding => visiblePrinterNames.Contains(binding.WindowsName))
+                .Where(binding => !activeByPrinter.ContainsKey(binding.PrinterId))
+                .ToDictionary(binding => binding.PrinterId);
+            if (bindings.Count == 0)
             {
-                logger.LogError(
-                    "Hub mengembalikan job {JobId} untuk printer {PrinterId} yang tidak diminta",
+                return 0;
+            }
+
+            var jobs = await hubClient.ClaimJobsAsync(
+                identity.HubBaseAddress,
+                identity.BearerToken,
+                AgentProduct.Version,
+                bindings.Keys.ToArray(),
+                stoppingToken);
+            var started = 0;
+            foreach (var job in jobs)
+            {
+                if (!bindings.TryGetValue(job.PrinterId, out var binding))
+                {
+                    logger.LogError(
+                        "The Hub returned job {JobId} for unrequested printer {PrinterId}",
+                        job.JobId,
+                        job.PrinterId);
+                    continue;
+                }
+
+                if (job.LeaseUntil <= timeProvider.GetUtcNow())
+                {
+                    logger.LogWarning("Ignoring job {JobId} because its lease has expired", job.JobId);
+                    continue;
+                }
+
+                if (job.Print.NormalizationWarnings is { Count: > 0 } warnings)
+                {
+                    logger.LogWarning(
+                        "Hub print settings for job {JobId} were normalized: {Warnings}",
+                        job.JobId,
+                        string.Join("; ", warnings));
+                }
+
+                var active = new ActiveJob(job.JobId, job.PrinterId, stoppingToken);
+                if (!activeByPrinter.TryAdd(job.PrinterId, active))
+                {
+                    active.Dispose();
+                    logger.LogWarning(
+                        "Printer {PrinterId} already has an active job; job {JobId} was not started",
+                        job.PrinterId,
+                        job.JobId);
+                    continue;
+                }
+
+                if (!activeByJob.TryAdd(job.JobId, active))
+                {
+                    activeByPrinter.TryRemove(job.PrinterId, out _);
+                    active.Dispose();
+                    logger.LogWarning("Job {JobId} is already active and will not be started twice", job.JobId);
+                    continue;
+                }
+
+                await healthPublisher.ReportJobClaimedAsync(
                     job.JobId,
-                    job.PrinterId);
-                continue;
+                    binding.WindowsName,
+                    job.Document.Pages,
+                    job.Display?.InvoiceNo,
+                    job.Display?.ItemType,
+                    stoppingToken);
+                active.Task = Task.Run(
+                    () => RunJobAsync(job, binding.WindowsName, active),
+                    CancellationToken.None);
+                started++;
             }
 
-            if (job.LeaseUntil <= timeProvider.GetUtcNow())
-            {
-                logger.LogWarning("Mengabaikan job {JobId} karena lease sudah kedaluwarsa", job.JobId);
-                continue;
-            }
-
-            var active = new ActiveJob(job.JobId, job.PrinterId, stoppingToken);
-            if (!activeByPrinter.TryAdd(job.PrinterId, active))
-            {
-                active.Dispose();
-                logger.LogWarning(
-                    "Printer {PrinterId} sudah memiliki job aktif; job {JobId} tidak dimulai",
-                    job.PrinterId,
-                    job.JobId);
-                continue;
-            }
-
-            if (!activeByJob.TryAdd(job.JobId, active))
-            {
-                activeByPrinter.TryRemove(job.PrinterId, out _);
-                active.Dispose();
-                logger.LogWarning("Job {JobId} sudah aktif dan tidak dijalankan dua kali", job.JobId);
-                continue;
-            }
-
-            active.Task = Task.Run(
-                () => RunJobAsync(job, binding.WindowsName, active),
-                CancellationToken.None);
-            started++;
+            return started;
         }
+        finally
+        {
+            claimGate.Release();
+        }
+    }
 
-        return started;
+    public async Task<IDisposable> SuspendClaimsAsync(CancellationToken cancellationToken)
+    {
+        await claimGate.WaitAsync(cancellationToken);
+        Volatile.Write(ref claimsSuspended, true);
+        return new ClaimSuspension(this);
     }
 
     public void AbortJobs(IEnumerable<Guid> jobIds)
@@ -124,7 +160,7 @@ public sealed class JobCoordinator(
         {
             if (activeByJob.TryGetValue(jobId, out var active))
             {
-                logger.LogWarning("Menghentikan job {JobId} atas perintah Hub", jobId);
+                logger.LogWarning("Stopping job {JobId} at the Hub's request", jobId);
                 active.Cancellation.Cancel();
             }
         }
@@ -144,13 +180,18 @@ public sealed class JobCoordinator(
         Guid printerId,
         CancellationToken cancellationToken)
     {
+        if (Volatile.Read(ref claimsSuspended))
+        {
+            throw new InvalidOperationException("A software update is waiting for the current print activity to finish.");
+        }
+
         var binding = SnapshotBindings().SingleOrDefault(item => item.PrinterId == printerId)
-            ?? throw new InvalidOperationException("Printer command tidak ada di konfigurasi agent.");
+            ?? throw new InvalidOperationException("The command printer is not present in the agent configuration.");
         var active = new ActiveJob(commandId, printerId, cancellationToken);
         if (!activeByPrinter.TryAdd(printerId, active))
         {
             active.Dispose();
-            throw new InvalidOperationException("Printer sedang memproses job lain.");
+            throw new InvalidOperationException("The printer is processing another job.");
         }
 
         try
@@ -178,11 +219,27 @@ public sealed class JobCoordinator(
         await Task.WhenAll(tasks);
     }
 
+    public async Task<bool> WaitForIdleAsync(TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var deadline = timeProvider.GetUtcNow() + timeout;
+        while (!activeByPrinter.IsEmpty)
+        {
+            if (timeProvider.GetUtcNow() >= deadline)
+            {
+                return false;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(250), timeProvider, cancellationToken);
+        }
+
+        return true;
+    }
+
     private IReadOnlyList<PrinterBinding> SnapshotBindings()
     {
         lock (configGate)
         {
-            return config?.Printers.ToArray() ?? [];
+            return config?.Printers?.ToArray() ?? [];
         }
     }
 
@@ -191,15 +248,23 @@ public sealed class JobCoordinator(
         try
         {
             logger.LogInformation(
-                "Memproses job {JobId} untuk printer {PrinterName}",
+                "Processing job {JobId} for printer {PrinterName}",
                 job.JobId,
                 windowsPrinterName);
             var previousSubmission = await journal.LoadAsync(job.JobId, active.Cancellation.Token);
             var result = previousSubmission is null
-                ? await jobProcessor.ProcessAsync(job, windowsPrinterName, active.Cancellation.Token)
-                : await jobProcessor.ResumeAsync(job, previousSubmission, active.Cancellation.Token);
+                ? await jobProcessor.ProcessAsync(
+                    job,
+                    windowsPrinterName,
+                    ReportProgressAsync,
+                    active.Cancellation.Token)
+                : await jobProcessor.ResumeAsync(
+                    job,
+                    previousSubmission,
+                    ReportProgressAsync,
+                    active.Cancellation.Token);
             logger.LogInformation(
-                "Job {JobId} selesai lokal dengan hasil {Outcome} dan JobId spooler {SpoolerJobId}",
+                "Job {JobId} completed locally with outcome {Outcome} and spooler JobId {SpoolerJobId}",
                 job.JobId,
                 result.Outcome,
                 result.SpoolerJobId);
@@ -208,13 +273,36 @@ public sealed class JobCoordinator(
         {
             // JobProcessor mengubah kegagalan kerja menjadi event durable. Catch ini menjaga
             // coordinator tetap hidup bila ada bug tak terduga di luar batas processor.
-            logger.LogError(ex, "Job {JobId} berhenti karena kegagalan tak terduga", job.JobId);
+            logger.LogError(ex, "Job {JobId} stopped because of an unexpected failure", job.JobId);
         }
         finally
         {
+            await healthPublisher.ReportJobFinishedAsync(job.JobId);
             activeByJob.TryRemove(job.JobId, out _);
             activeByPrinter.TryRemove(job.PrinterId, out _);
             active.Dispose();
+        }
+
+        Task ReportProgressAsync(JobProgressUpdate update, CancellationToken cancellationToken) =>
+            ReportProgressAndLogAsync(update, cancellationToken);
+
+        async Task ReportProgressAndLogAsync(
+            JobProgressUpdate update,
+            CancellationToken cancellationToken)
+        {
+            // Health snapshot menggerakkan dashboard, sedangkan log stage membuat operator
+            // dapat melihat bahwa pipeline tetap maju selama verifikasi spooler yang panjang.
+            logger.LogInformation(
+                "Job {JobId} on printer {PrinterName} moved to stage {Stage}; spooler JobId {SpoolerJobId}",
+                job.JobId,
+                windowsPrinterName,
+                update.Stage,
+                update.SpoolerJobId);
+            await healthPublisher.ReportJobProgressAsync(
+                job.JobId,
+                update.Stage,
+                update.SpoolerJobId,
+                cancellationToken);
         }
     }
 
@@ -233,5 +321,22 @@ public sealed class JobCoordinator(
         public Task? Task { get; set; }
 
         public void Dispose() => Cancellation.Dispose();
+    }
+
+    private sealed class ClaimSuspension(JobCoordinator owner) : IDisposable
+    {
+        private JobCoordinator? currentOwner = owner;
+
+        public void Dispose()
+        {
+            var releaseOwner = Interlocked.Exchange(ref currentOwner, null);
+            if (releaseOwner is null)
+            {
+                return;
+            }
+
+            Volatile.Write(ref releaseOwner.claimsSuspended, false);
+            releaseOwner.claimGate.Release();
+        }
     }
 }

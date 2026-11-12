@@ -38,6 +38,7 @@ public sealed class PdfiumPrintEngine : IPrintEngine
         PrintRequest request,
         CancellationToken cancellationToken)
     {
+        EnsureUnattendedPrinter(request.PrinterName);
         PdfiumNative.InitLibrary();
         try
         {
@@ -45,7 +46,7 @@ public sealed class PdfiumPrintEngine : IPrintEngine
             if (document == 0)
             {
                 throw new InvalidDataException(
-                    $"PDFium tidak dapat membuka dokumen (error {PdfiumNative.GetLastError()}).");
+                    $"PDFium could not open the document (error {PdfiumNative.GetLastError()}).");
             }
 
             try
@@ -53,20 +54,20 @@ public sealed class PdfiumPrintEngine : IPrintEngine
                 var pageCount = PdfiumNative.GetPageCount(document);
                 if (pageCount <= 0)
                 {
-                    throw new InvalidDataException("PDF tidak memiliki halaman yang dapat dicetak.");
+                    throw new InvalidDataException("The PDF does not contain any printable pages.");
                 }
 
                 if (request.ExpectedPageCount is int expectedPageCount
                     && pageCount != expectedPageCount)
                 {
                     throw new InvalidDataException(
-                        $"PDF memiliki {pageCount} halaman, claim menyatakan {expectedPageCount}.");
+                        $"The PDF contains {pageCount} pages, but the claim declares {expectedPageCount}.");
                 }
 
                 var deviceContext = PInvoke.CreateDCW(null, request.PrinterName, null, null);
                 if (deviceContext.IsNull)
                 {
-                    throw LastWin32Error($"CreateDC gagal untuk printer '{request.PrinterName}'");
+                    throw LastWin32Error($"CreateDC failed for printer '{request.PrinterName}'");
                 }
 
                 try
@@ -107,7 +108,7 @@ public sealed class PdfiumPrintEngine : IPrintEngine
             var spoolerJobId = PInvoke.StartDoc(deviceContext, in documentInfo);
             if (spoolerJobId <= 0)
             {
-                throw LastWin32Error("StartDoc gagal");
+                throw LastWin32Error("StartDoc failed");
             }
 
             var completed = false;
@@ -129,7 +130,7 @@ public sealed class PdfiumPrintEngine : IPrintEngine
 
                 if (PInvoke.EndDoc(deviceContext) <= 0)
                 {
-                    throw LastWin32Error("EndDoc gagal");
+                    throw LastWin32Error("EndDoc failed");
                 }
 
                 completed = true;
@@ -157,7 +158,7 @@ public sealed class PdfiumPrintEngine : IPrintEngine
         if (page == 0)
         {
             throw new InvalidDataException(
-                $"PDFium tidak dapat membuka halaman {pageIndex + 1} (error {PdfiumNative.GetLastError()}).");
+                $"PDFium could not open page {pageIndex + 1} (error {PdfiumNative.GetLastError()}).");
         }
 
         try
@@ -166,7 +167,7 @@ public sealed class PdfiumPrintEngine : IPrintEngine
             var pageHeightPoints = PdfiumNative.GetPageHeight(page);
             if (pageWidthPoints <= 0 || pageHeightPoints <= 0)
             {
-                throw new InvalidDataException($"Ukuran halaman {pageIndex + 1} tidak valid.");
+                throw new InvalidDataException($"Page {pageIndex + 1} has an invalid size.");
             }
 
             var layout = PageLayoutCalculator.Calculate(
@@ -176,7 +177,7 @@ public sealed class PdfiumPrintEngine : IPrintEngine
                 scaleMode);
             if (PInvoke.StartPage(deviceContext) <= 0)
             {
-                throw LastWin32Error($"StartPage gagal pada halaman {pageIndex + 1}");
+                throw LastWin32Error($"StartPage failed on page {pageIndex + 1}");
             }
 
             try
@@ -192,14 +193,14 @@ public sealed class PdfiumPrintEngine : IPrintEngine
                         PdfiumFlagAnnotations | PdfiumFlagPrinting) == 0)
                 {
                     throw new InvalidOperationException(
-                        $"PDFium gagal merender halaman {pageIndex + 1}.");
+                        $"PDFium failed to render page {pageIndex + 1}.");
                 }
             }
             finally
             {
                 if (PInvoke.EndPage(deviceContext) <= 0)
                 {
-                    throw LastWin32Error($"EndPage gagal pada halaman {pageIndex + 1}");
+                    throw LastWin32Error($"EndPage failed on page {pageIndex + 1}");
                 }
             }
         }
@@ -217,7 +218,7 @@ public sealed class PdfiumPrintEngine : IPrintEngine
         var dpiY = PInvoke.GetDeviceCaps(deviceContext, GET_DEVICE_CAPS_INDEX.LOGPIXELSY);
         if (printableWidth <= 0 || printableHeight <= 0 || dpiX <= 0 || dpiY <= 0)
         {
-            throw new InvalidOperationException("Driver printer tidak melaporkan area cetak atau DPI yang valid.");
+            throw new InvalidOperationException("The printer driver did not report a valid printable area or DPI.");
         }
 
         return new PrinterPageMetrics(printableWidth, printableHeight, dpiX, dpiY);
@@ -231,19 +232,41 @@ public sealed class PdfiumPrintEngine : IPrintEngine
         ArgumentException.ThrowIfNullOrWhiteSpace(request.DocumentName);
         if (!File.Exists(request.DocumentPath))
         {
-            throw new FileNotFoundException("Dokumen PDF tidak ditemukan.", request.DocumentPath);
+            throw new FileNotFoundException("The PDF document was not found.", request.DocumentPath);
         }
 
         if (request.Copies is < 1 or > 99)
         {
-            throw new ArgumentOutOfRangeException(nameof(request), "Jumlah salinan harus 1 sampai 99.");
+            throw new ArgumentOutOfRangeException(nameof(request), "The copy count must be between 1 and 99.");
         }
 
         // Duplex dan tray membutuhkan DEVMODE driver yang akan masuk Fase pengaturan cetak
         // (FR-22). Gagal terang-terangan mencegah invoice dicetak dengan setting yang salah.
         if (request.Duplex || !string.IsNullOrWhiteSpace(request.Tray))
         {
-            throw new NotSupportedException("Pengaturan duplex/tray belum didukung engine PDFium.");
+            throw new NotSupportedException("Duplex and tray settings are not supported by the PDFium engine yet.");
+        }
+    }
+
+    private static void EnsureUnattendedPrinter(string printerName)
+    {
+        var printer = PrinterInventory.List().SingleOrDefault(item =>
+            string.Equals(item.Name, printerName, StringComparison.OrdinalIgnoreCase));
+        if (printer is null)
+        {
+            return;
+        }
+
+        var reason = UnattendedPrinterGuard.FindUnsupportedReason(
+            printer.DriverName,
+            printer.Ports.Select(port => port.Name));
+        if (reason is not null)
+        {
+            // Windows Service tidak memiliki interactive desktop. Membiarkan driver seperti
+            // Print to PDF membuka Save As akan menahan StartDoc tanpa batas di Session 0.
+            throw new UnattendedPrintingNotSupportedException(
+                $"Printer '{printerName}' cannot be used by the Windows Service because {reason}. "
+                + "Use a physical/network printer or Agent simulation mode.");
         }
     }
 

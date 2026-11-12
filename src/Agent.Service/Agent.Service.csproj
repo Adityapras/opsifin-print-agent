@@ -4,6 +4,7 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <InvariantGlobalization>true</InvariantGlobalization>
     <PublishAot>true</PublishAot>
+    <ApplicationIcon>..\..\assets\branding\opsifin-agent.ico</ApplicationIcon>
     <UserSecretsId>dotnet-Agent.Service-15190237-e6d0-4929-8db9-340f8f7d7cc7</UserSecretsId>
   </PropertyGroup>
 
@@ -14,6 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Agent.Local\Agent.Local.csproj" />
     <ProjectReference Include="..\Agent.Printing\Agent.Printing.csproj" />
     <ProjectReference Include="..\Agent.Runtime\Agent.Runtime.csproj" />
     <ProjectReference Include="..\Agent.Hub\Agent.Hub.csproj" />

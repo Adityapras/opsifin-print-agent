@@ -57,7 +57,7 @@ public sealed class PrintJobJournal(string directory)
             stream,
             RuntimeJsonContext.Default.ActivePrintRecord,
             cancellationToken)
-            ?? throw new InvalidDataException($"Jurnal job {jobId} kosong.");
+            ?? throw new InvalidDataException($"Job journal {jobId} is empty.");
     }
 
     public void Remove(Guid jobId)

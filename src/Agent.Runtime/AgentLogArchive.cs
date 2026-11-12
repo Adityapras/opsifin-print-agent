@@ -13,7 +13,7 @@ public sealed class AgentLogArchive(AgentLogArchiveOptions options, TimeProvider
     {
         if (hours is < 1 or > 168)
         {
-            throw new ArgumentOutOfRangeException(nameof(hours), "Rentang log harus 1 sampai 168 jam.");
+            throw new ArgumentOutOfRangeException(nameof(hours), "The log range must be between 1 and 168 hours.");
         }
 
         Directory.CreateDirectory(options.ArchiveDirectory);

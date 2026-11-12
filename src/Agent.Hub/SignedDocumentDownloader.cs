@@ -16,7 +16,7 @@ public sealed class SignedDocumentDownloader(HttpClient httpClient)
         ValidateDocument(document);
 
         var directory = Path.GetDirectoryName(destinationPath)
-            ?? throw new ArgumentException("Path dokumen tidak memiliki direktori.", nameof(destinationPath));
+            ?? throw new ArgumentException("The document path does not have a directory.", nameof(destinationPath));
         Directory.CreateDirectory(directory);
         var temporaryPath = $"{destinationPath}.{Guid.CreateVersion7():N}.tmp";
 
@@ -33,7 +33,7 @@ public sealed class SignedDocumentDownloader(HttpClient httpClient)
                 && contentLength != document.SizeBytes)
             {
                 throw new InvalidDataException(
-                    $"Ukuran PDF dari header {contentLength} byte, seharusnya {document.SizeBytes} byte.");
+                    $"The PDF header reports {contentLength} bytes; expected {document.SizeBytes} bytes.");
             }
 
             await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -61,7 +61,7 @@ public sealed class SignedDocumentDownloader(HttpClient httpClient)
                 totalBytes += read;
                 if (totalBytes > document.SizeBytes)
                 {
-                    throw new InvalidDataException("PDF lebih besar daripada ukuran pada claim.");
+                    throw new InvalidDataException("The PDF is larger than the size declared in the claim.");
                 }
 
                 if (headerLength < header.Length)
@@ -78,24 +78,23 @@ public sealed class SignedDocumentDownloader(HttpClient httpClient)
             if (totalBytes != document.SizeBytes)
             {
                 throw new InvalidDataException(
-                    $"Ukuran PDF {totalBytes} byte, seharusnya {document.SizeBytes} byte.");
+                    $"The PDF size is {totalBytes} bytes; expected {document.SizeBytes} bytes.");
             }
 
             if (headerLength < header.Length || !header.AsSpan().SequenceEqual("%PDF-"u8))
             {
-                throw new InvalidDataException("Dokumen tidak memiliki header PDF yang valid.");
+                throw new InvalidDataException("The document does not have a valid PDF header.");
             }
 
             var actualHash = hash.GetHashAndReset();
             var expectedHash = Convert.FromHexString(document.Sha256);
             if (!CryptographicOperations.FixedTimeEquals(actualHash, expectedHash))
             {
-                throw new InvalidDataException("SHA-256 PDF tidak cocok dengan claim.");
+                throw new InvalidDataException("The PDF SHA-256 does not match the claim.");
             }
 
             await destination.FlushAsync(cancellationToken);
-            destination.Close();
-            File.Move(temporaryPath, destinationPath, true);
+            AtomicFileCommit.CloseAndMove(destination, temporaryPath, destinationPath);
 
             return new DownloadedDocument(destinationPath, totalBytes, Convert.ToHexString(actualHash).ToLowerInvariant());
         }
@@ -114,18 +113,18 @@ public sealed class SignedDocumentDownloader(HttpClient httpClient)
             && !(string.Equals(document.Url.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
                 && document.Url.IsLoopback))
         {
-            throw new InvalidDataException("Signed URL wajib HTTPS; HTTP hanya boleh untuk loopback.");
+            throw new InvalidDataException("The signed URL must use HTTPS; HTTP is allowed only for loopback.");
         }
 
         if (document.SizeBytes is <= 0 or > MaximumDocumentSizeBytes)
         {
             throw new InvalidDataException(
-                $"Ukuran PDF harus 1 sampai {MaximumDocumentSizeBytes} byte.");
+                $"The PDF size must be between 1 and {MaximumDocumentSizeBytes} bytes.");
         }
 
         if (document.Sha256.Length != 64)
         {
-            throw new InvalidDataException("SHA-256 pada claim harus 64 karakter heksadesimal.");
+            throw new InvalidDataException("The claim SHA-256 must contain 64 hexadecimal characters.");
         }
 
         try
@@ -134,7 +133,7 @@ public sealed class SignedDocumentDownloader(HttpClient httpClient)
         }
         catch (FormatException ex)
         {
-            throw new InvalidDataException("SHA-256 pada claim bukan heksadesimal yang valid.", ex);
+            throw new InvalidDataException("The claim SHA-256 is not valid hexadecimal.", ex);
         }
     }
 }

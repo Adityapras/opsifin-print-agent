@@ -52,7 +52,7 @@ public sealed class EventOutboxDispatcher(
 
                 foreach (var item in batch.Where(item => !acknowledged.Contains(item.Event.EventId)))
                 {
-                    await RescheduleAsync(item, now, "Hub tidak mengakui event.", cancellationToken);
+                    await RescheduleAsync(item, now, "The Hub did not acknowledge the event.", cancellationToken);
                     rescheduled++;
                 }
 

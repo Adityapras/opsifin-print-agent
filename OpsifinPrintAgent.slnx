@@ -1,11 +1,16 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Agent.Desktop/Agent.Desktop.csproj" />
     <Project Path="src/Agent.Hub/Agent.Hub.csproj" />
+    <Project Path="src/Agent.Local/Agent.Local.csproj" />
     <Project Path="src/Agent.Printing/Agent.Printing.csproj" />
     <Project Path="src/Agent.Runtime/Agent.Runtime.csproj" />
     <Project Path="src/Agent.Service/Agent.Service.csproj" />
+    <Project Path="src/Agent.Updater/Agent.Updater.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Agent.Desktop.Tests/Agent.Desktop.Tests.csproj" />
+    <Project Path="tests/Agent.Local.Tests/Agent.Local.Tests.csproj" />
     <Project Path="tests/Agent.Tests/Agent.Tests.csproj" />
   </Folder>
 </Solution>

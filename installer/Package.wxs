@@ -2,22 +2,44 @@
   <Package
     Name="Opsifin Print Agent"
     Manufacturer="Opsigo"
-    Version="0.1.0"
+    Version="$(var.ProductVersion)"
     UpgradeCode="D869047A-A45C-4C3A-B1CE-3D716396B99D"
     Scope="perMachine">
 
-    <MajorUpgrade DowngradeErrorMessage="Versi Opsifin Print Agent yang lebih baru sudah terpasang." />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Opsifin Print Agent is already installed." />
     <MediaTemplate EmbedCab="yes" />
+    <Icon Id="OpsifinAgentIcon.ico" SourceFile="$(var.BrandAssetsDir)\opsifin-agent.ico" />
+    <Property Id="ARPPRODUCTICON" Value="OpsifinAgentIcon.ico" />
 
     <StandardDirectory Id="ProgramFiles6432Folder">
       <Directory Id="OpsigoDirectory" Name="Opsigo">
         <Directory Id="INSTALLFOLDER" Name="Opsifin Print Agent" />
       </Directory>
     </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="OpsifinProgramMenuFolder" Name="Opsifin" />
+    </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder" />
 
     <Feature Id="MainFeature" Title="Opsifin Print Agent" Level="1">
       <ComponentGroupRef Id="AgentFiles" />
     </Feature>
+
+    <Property Id="WixUnelevatedShellExecTarget" Value="[#AgentControlExe]" />
+    <CustomAction
+      Id="LaunchAgentControl"
+      BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+      DllEntry="WixUnelevatedShellExec"
+      Execute="immediate"
+      Return="ignore" />
+    <InstallExecuteSequence>
+      <!-- Shell milik user dipakai agar companion tray hidup di sesi desktop, bukan di sesi
+           installer elevated. Companion membuka proses control terpisah melalui UAC. -->
+      <Custom
+        Action="LaunchAgentControl"
+        After="InstallFinalize"
+        Condition="NOT (REMOVE~=&quot;ALL&quot;) AND UILevel &gt;= 4" />
+    </InstallExecuteSequence>
   </Package>
 
   <Fragment>
@@ -28,7 +50,7 @@
           Id="AgentServiceInstall"
           Name="OpsifinPrintAgent"
           DisplayName="Opsifin Print Agent"
-          Description="Mencetak job dari Opsifin Print Hub melalui printer Windows."
+          Description="Prints jobs from Opsifin Print Hub through Windows printers."
           Type="ownProcess"
           Start="auto"
           ErrorControl="normal"
@@ -52,6 +74,36 @@
       </Component>
       <Component Id="AppSettingsComponent" Guid="B269D49F-8AEF-4DCE-993B-831952909BFD" NeverOverwrite="yes">
         <File Id="AppSettingsJson" Source="$(var.AgentPublishDir)\appsettings.json" KeyPath="yes" />
+      </Component>
+      <Component Id="AgentControlComponent" Guid="79851E56-D757-4B5F-AF5C-AF1092C305E6">
+        <File Id="AgentControlExe" Source="$(var.ControlPublishDir)\Opsifin.Agent.Control.exe" KeyPath="yes">
+          <Shortcut
+            Id="AgentControlStartMenuShortcut"
+            Directory="OpsifinProgramMenuFolder"
+            Name="Opsifin Agent Control"
+            Description="Pairing, status, and diagnostics for Opsifin Print Agent"
+            WorkingDirectory="INSTALLFOLDER"
+            Advertise="yes" />
+          <Shortcut
+            Id="AgentControlDesktopShortcut"
+            Directory="DesktopFolder"
+            Name="Opsifin Agent Control"
+            Description="Pairing, status, and diagnostics for Opsifin Print Agent"
+            WorkingDirectory="INSTALLFOLDER"
+            Advertise="yes" />
+        </File>
+        <!-- Companion tray berjalan sebagai user biasa saat login. Tindakan administratif
+             diluncurkan terpisah melalui UAC hanya ketika Agent Control dibuka. -->
+        <RegistryValue
+          Root="HKLM"
+          Key="Software\Microsoft\Windows\CurrentVersion\Run"
+          Name="OpsifinPrintAgentTray"
+          Value="&quot;[#AgentControlExe]&quot; --tray"
+          Type="string" />
+        <RemoveFolder Id="RemoveOpsifinProgramMenuFolder" Directory="OpsifinProgramMenuFolder" On="uninstall" />
+      </Component>
+      <Component Id="AgentUpdaterComponent" Guid="A06D289A-0D56-4B7B-A438-927A816FD00E">
+        <File Id="AgentUpdaterExe" Source="$(var.UpdaterPublishDir)\Opsifin.Agent.Updater.exe" KeyPath="yes" />
       </Component>
     </ComponentGroup>
   </Fragment>

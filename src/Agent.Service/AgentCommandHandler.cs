@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Agent.Hub;
+using Agent.Local;
 using Agent.Printing;
 using Agent.Runtime;
 
@@ -12,6 +13,7 @@ public sealed class AgentCommandHandler(
     DeviceIdentityStore identityStore,
     AgentLogArchive logArchive,
     CommandJournal journal,
+    AgentUpdateCoordinator updateCoordinator,
     TimeProvider timeProvider)
 {
     public async Task HandleAsync(
@@ -51,8 +53,8 @@ public sealed class AgentCommandHandler(
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Command {CommandId} ({CommandType}) gagal", command.Id, command.Type);
-                result = new CommandResult("failed", "Command gagal dijalankan oleh agent.");
+                logger.LogError(ex, "Command {CommandId} ({CommandType}) failed", command.Id, command.Type);
+                result = new CommandResult("failed", "The agent failed to execute the command.");
             }
 
             var completed = new CommandExecutionRecord(
@@ -77,15 +79,21 @@ public sealed class AgentCommandHandler(
         {
             "reload_config" => new CommandResult(
                 "succeeded",
-                "Konfigurasi terbaru sudah diterapkan dari heartbeat."),
+                "The latest configuration was applied from the heartbeat."),
             "test_page" => await PrintTestPageAsync(identity, command, cancellationToken),
             "upload_logs" => await UploadLogsAsync(command, cancellationToken),
-            "update" => new CommandResult(
-                "failed",
-                "Updater menunggu spesifikasi kunci publik dan signature Hub."),
+            "update" => await ScheduleUpdateAsync(command, cancellationToken),
             "rotate_secret" => await RotateSecretAsync(identity, command, cancellationToken),
-            _ => new CommandResult("failed", $"Tipe command '{command.Type}' tidak dikenal."),
+            _ => new CommandResult("failed", $"Command type '{command.Type}' is not recognized."),
         };
+
+    private async Task<CommandResult> ScheduleUpdateAsync(
+        AgentCommand command,
+        CancellationToken cancellationToken)
+    {
+        var result = await updateCoordinator.ScheduleAsync(command, cancellationToken);
+        return new CommandResult(result.Accepted ? "succeeded" : "failed", result.Message);
+    }
 
     private async Task<CommandResult> PrintTestPageAsync(
         DeviceIdentity identity,
@@ -94,7 +102,7 @@ public sealed class AgentCommandHandler(
     {
         if (!TryReadPrinterId(command.Args, out var printerId))
         {
-            return new CommandResult("failed", "Argumen printer_id tidak valid atau tidak tersedia.");
+            return new CommandResult("failed", "The printer_id argument is missing or invalid.");
         }
 
         var result = await jobCoordinator.PrintTestPageAsync(
@@ -105,10 +113,10 @@ public sealed class AgentCommandHandler(
         return result.Outcome == SpoolerMonitorOutcome.Completed
             ? new CommandResult(
                 "succeeded",
-                $"Test page selesai dicetak (spooler JobId {result.SpoolerJobId}).")
+                $"The test page was printed successfully (spooler JobId {result.SpoolerJobId}).")
             : new CommandResult(
                 "failed",
-                $"Test page tidak terverifikasi: {result.Outcome}. {result.Message}");
+                $"The test page could not be verified: {result.Outcome}. {result.Message}");
     }
 
     private async Task<CommandResult> UploadLogsAsync(
@@ -117,13 +125,13 @@ public sealed class AgentCommandHandler(
     {
         if (!TryReadHours(command.Args, out var hours))
         {
-            return new CommandResult("failed", "Argumen hours harus berupa angka 1 sampai 168.");
+            return new CommandResult("failed", "The hours argument must be a number between 1 and 168.");
         }
 
         var archivePath = await logArchive.CreateAsync(command.Id, hours, cancellationToken);
         return new CommandResult(
             "succeeded",
-            $"Log {hours} jam terakhir disertakan.",
+            $"Logs from the last {hours} hour(s) are attached.",
             archivePath,
             $"opsifin-agent-logs-{command.Id:N}.zip",
             "application/zip");
@@ -136,14 +144,14 @@ public sealed class AgentCommandHandler(
     {
         if (!TryReadString(command.Args, "new_secret", out var newSecret))
         {
-            return new CommandResult("failed", "Argumen new_secret tidak valid atau tidak tersedia.");
+            return new CommandResult("failed", "The new_secret argument is missing or invalid.");
         }
 
         // Identity baru dipersistenkan lebih dulu. Bila proses mati setelah titik ini, restart
         // akan memakai secret baru dan jurnal mencegah command rotasi dijalankan dua kali.
         await identityStore.SaveAsync(identity.WithDeviceSecret(newSecret), cancellationToken);
         identity.UseDeviceSecret(newSecret);
-        return new CommandResult("succeeded", "Device secret berhasil dirotasi.");
+        return new CommandResult("succeeded", "The device secret was rotated successfully.");
     }
 
     private async Task ReportExistingAsync(
@@ -155,7 +163,7 @@ public sealed class AgentCommandHandler(
         if (!string.Equals(record.CommandType, command.Type, StringComparison.Ordinal))
         {
             logger.LogError(
-                "Command ID {CommandId} dipakai ulang untuk tipe {OldType} dan {NewType}",
+                "Command ID {CommandId} was reused for types {OldType} and {NewType}",
                 command.Id,
                 record.CommandType,
                 command.Type);
@@ -165,7 +173,7 @@ public sealed class AgentCommandHandler(
                 {
                     State = CommandExecutionState.Completed,
                     ResultStatus = "failed",
-                    ResultMessage = "Command ID dipakai ulang dengan tipe berbeda.",
+                    ResultMessage = "The command ID was reused with a different type.",
                     AttachmentPath = null,
                     AttachmentName = null,
                     AttachmentMediaType = null,
@@ -182,7 +190,7 @@ public sealed class AgentCommandHandler(
             {
                 State = CommandExecutionState.Completed,
                 ResultStatus = "failed",
-                ResultMessage = "Command sebelumnya terputus dan tidak dijalankan ulang untuk mencegah duplikasi.",
+                ResultMessage = "The previous command was interrupted and was not rerun to prevent duplicate effects.",
                 UpdatedAt = timeProvider.GetUtcNow(),
             };
             await journal.SaveAsync(record, cancellationToken);
@@ -215,14 +223,14 @@ public sealed class AgentCommandHandler(
             else
             {
                 status = "failed";
-                message = "Lampiran command tidak tersedia lagi di penyimpanan lokal agent.";
+                message = "The command attachment is no longer available in local agent storage.";
             }
         }
 
         await hubClient.SendCommandResultAsync(
             identity.HubBaseAddress,
             identity.BearerToken,
-            AgentMetadata.Version,
+            AgentProduct.Version,
             record.CommandId,
             status,
             message,

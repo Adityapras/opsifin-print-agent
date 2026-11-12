@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\..\assets\branding\opsifin-agent.ico</ApplicationIcon>
+    <AssemblyName>Opsifin.Agent.Control</AssemblyName>
+    <RootNamespace>Agent.Desktop</RootNamespace>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="10.0.13" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Agent.Hub\Agent.Hub.csproj" />
+    <ProjectReference Include="..\Agent.Local\Agent.Local.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="..\..\assets\branding\opsifin-agent.ico" Link="Assets\opsifin-agent.ico" />
+    <Resource Include="..\..\assets\branding\opsifin-agent.png" Link="Assets\opsifin-agent.png" />
+  </ItemGroup>
+
+</Project>

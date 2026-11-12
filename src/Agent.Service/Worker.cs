@@ -1,5 +1,6 @@
 using System.Net;
 using Agent.Hub;
+using Agent.Local;
 using Agent.Printing;
 
 namespace Agent.Service;
@@ -12,12 +13,15 @@ public sealed class Worker(
     EventOutboxDispatcher outboxDispatcher,
     JobCoordinator jobCoordinator,
     AgentCommandHandler commandHandler,
+    AgentUpdateStore updateStore,
+    AgentHealthPublisher healthPublisher,
     AgentExecutionOptions executionOptions) : BackgroundService
 {
     private const int AuthenticationRetrySeconds = 300;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        await healthPublisher.ReportStartingAsync(stoppingToken);
         try
         {
             AgentStatePaths.EnsureSecureStateDirectory();
@@ -25,7 +29,12 @@ public sealed class Worker(
         }
         catch (Exception ex)
         {
-            logger.LogCritical(ex, "Outbox SQLite tidak dapat diinisialisasi; agent tidak boleh berjalan tanpa durability event");
+            logger.LogCritical(ex, "The SQLite outbox could not be initialized; the agent cannot run without durable events");
+            await healthPublisher.ReportFailureAsync(
+                AgentConnectionStates.Degraded,
+                "outbox_initialization_failed",
+                "The SQLite outbox could not be initialized.",
+                stoppingToken);
             return;
         }
 
@@ -36,9 +45,15 @@ public sealed class Worker(
         }
 
         logger.LogInformation(
-            "Opsifin Print Agent {Version} berjalan sebagai {AgentId}",
-            AgentMetadata.Version,
+            "Opsifin Print Agent {Version} is running as {AgentId}",
+            AgentProduct.Version,
             identity.AgentId);
+        if (executionOptions.SimulationMode)
+        {
+            logger.LogWarning(
+                "Simulation mode is enabled; Hub jobs will complete without sending output to a physical printer");
+        }
+        await healthPublisher.ReportConnectingAsync(stoppingToken);
 
         try
         {
@@ -55,6 +70,7 @@ public sealed class Worker(
         {
             jobCoordinator.AbortAll();
             await jobCoordinator.WaitForActiveJobsAsync();
+            await healthPublisher.ReportStoppingAsync();
         }
     }
 
@@ -62,6 +78,7 @@ public sealed class Worker(
     {
         var configVersion = 0L;
         var heartbeatIntervalSeconds = AgentRuntimeDefaults.HeartbeatIntervalSeconds;
+        int? sourcePollIntervalSeconds = null;
         var consecutiveFailures = 0;
 
         while (!stoppingToken.IsCancellationRequested)
@@ -71,31 +88,36 @@ public sealed class Worker(
             {
                 var now = DateTimeOffset.UtcNow;
                 var printers = BuildPrinterReports();
+                var update = await BuildUpdateHeartbeatAsync(stoppingToken);
+                await healthPublisher.ReportHeartbeatAttemptAsync(stoppingToken);
                 var response = await hubClient.HeartbeatAsync(
                     identity.HubBaseAddress,
                     identity.BearerToken,
-                    AgentMetadata.Version,
+                    AgentProduct.Version,
                     new HeartbeatRequest(
-                        AgentMetadata.Version,
+                        AgentProduct.Version,
                         Environment.TickCount64 / 1000,
                         now,
                         configVersion,
                         executionOptions.SimulationMode ? ["simulation"] : ["pdfium"],
-                        printers),
+                        printers,
+                        update),
                     stoppingToken);
 
                 configVersion = response.ConfigVersion;
                 if (response.Config is not null)
                 {
+                    LogNormalizedPrintSettings(response.Config);
                     jobCoordinator.UpdateConfiguration(response.Config);
                     heartbeatIntervalSeconds = NormalizeHeartbeatInterval(response.Config.HeartbeatIntervalS);
+                    sourcePollIntervalSeconds = response.Config.SourcePollIntervalS;
                 }
 
                 consecutiveFailures = 0;
                 var clockDrift = Math.Abs((response.ServerTime - now).TotalSeconds);
                 if (clockDrift > 60)
                 {
-                    logger.LogWarning("Selisih jam agent dan Hub {ClockDrift:F0} detik", clockDrift);
+                    logger.LogWarning("The agent and Hub clocks differ by {ClockDrift:F0} seconds", clockDrift);
                 }
 
                 if (response.Commands is { Count: > 0 })
@@ -103,25 +125,42 @@ public sealed class Worker(
                     await commandHandler.HandleAsync(identity, response.Commands, stoppingToken);
                 }
 
+                await healthPublisher.ReportOnlineAsync(
+                    configVersion,
+                    jobCoordinator.ClaimIntervalSeconds,
+                    sourcePollIntervalSeconds,
+                    printers,
+                    stoppingToken);
+
                 logger.LogDebug(
-                    "Heartbeat diterima; config version {ConfigVersion}, {PrinterCount} printer",
+                    "Heartbeat accepted; config version {ConfigVersion}, {PrinterCount} printer(s)",
                     configVersion,
                     printers.Count);
             }
             catch (AgentApiException ex) when (ex.StatusCode is HttpStatusCode.Unauthorized)
             {
-                logger.LogError("Hub menolak identitas agent ({ErrorCode})", ex.ErrorCode);
+                logger.LogError("The Hub rejected the agent identity ({ErrorCode})", ex.ErrorCode);
+                await healthPublisher.ReportFailureAsync(
+                    AgentConnectionStates.AuthenticationFailed,
+                    ex.ErrorCode,
+                    "The Hub rejected the agent identity.",
+                    stoppingToken);
                 delaySeconds = AuthenticationRetrySeconds;
             }
             catch (AgentApiException ex) when ((int?)ex.StatusCode == 426)
             {
-                logger.LogError("Versi agent ditolak Hub ({ErrorCode}); menunggu perintah update", ex.ErrorCode);
+                logger.LogError("The Hub rejected the agent version ({ErrorCode}); waiting for an update command", ex.ErrorCode);
+                await healthPublisher.ReportFailureAsync(
+                    AgentConnectionStates.UpdateRequired,
+                    ex.ErrorCode,
+                    "The agent version must be updated.",
+                    stoppingToken);
                 delaySeconds = AuthenticationRetrySeconds;
             }
             catch (AgentApiException ex) when (ex.StatusCode == HttpStatusCode.TooManyRequests)
             {
                 delaySeconds = RetryAfterSeconds(ex);
-                logger.LogWarning("Hub membatasi heartbeat; mencoba lagi dalam {DelaySeconds} detik", delaySeconds);
+                logger.LogWarning("The Hub rate-limited the heartbeat; retrying in {DelaySeconds} seconds", delaySeconds);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -131,10 +170,56 @@ public sealed class Worker(
             {
                 consecutiveFailures++;
                 delaySeconds = CalculateBackoffSeconds(consecutiveFailures);
-                logger.LogWarning(ex, "Heartbeat gagal; mencoba lagi dalam {DelaySeconds} detik", delaySeconds);
+                logger.LogWarning(ex, "Heartbeat failed; retrying in {DelaySeconds} seconds", delaySeconds);
+                await healthPublisher.ReportFailureAsync(
+                    AgentConnectionStates.Degraded,
+                    ex is AgentApiException apiException ? apiException.ErrorCode : ex.GetType().Name,
+                    ex.Message,
+                    stoppingToken);
             }
 
             await Task.Delay(TimeSpan.FromSeconds(delaySeconds), stoppingToken);
+        }
+    }
+
+    private async Task<AgentUpdateHeartbeat?> BuildUpdateHeartbeatAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var state = await updateStore.LoadAsync(cancellationToken);
+            if (state is null || state.Status == AgentUpdateStatuses.Succeeded)
+            {
+                return null;
+            }
+
+            // Hub memakai lifecycle yang lebih ringkas daripada state internal Agent.
+            // Pending download dan verifikasi tetap dilaporkan sebagai proses download.
+            var status = state.Status switch
+            {
+                AgentUpdateStatuses.PendingDownload => AgentUpdateStatuses.Downloading,
+                AgentUpdateStatuses.Verifying => AgentUpdateStatuses.Downloading,
+                AgentUpdateStatuses.Downloading => AgentUpdateStatuses.Downloading,
+                AgentUpdateStatuses.Ready => AgentUpdateStatuses.Ready,
+                AgentUpdateStatuses.WaitingForIdle => AgentUpdateStatuses.WaitingForIdle,
+                AgentUpdateStatuses.Installing => AgentUpdateStatuses.Installing,
+                AgentUpdateStatuses.Failed => AgentUpdateStatuses.Failed,
+                _ => null,
+            };
+
+            return status is null
+                ? null
+                : new AgentUpdateHeartbeat(
+                    state.CommandId,
+                    state.TargetVersion,
+                    status,
+                    Math.Clamp(state.ProgressPercent, 0, 100),
+                    state.Message,
+                    state.UpdatedAt);
+        }
+        catch (Exception exception) when (exception is IOException or System.Text.Json.JsonException)
+        {
+            logger.LogWarning(exception, "The local update state could not be added to heartbeat");
+            return null;
         }
     }
 
@@ -156,7 +241,7 @@ public sealed class Worker(
                         stoppingToken);
                     if (started > 0)
                     {
-                        logger.LogInformation("Memulai {JobCount} job hasil claim", started);
+                        logger.LogInformation("Starting {JobCount} claimed job(s)", started);
                     }
                 }
 
@@ -166,12 +251,12 @@ public sealed class Worker(
                                                || (int?)ex.StatusCode == 426)
             {
                 delaySeconds = AuthenticationRetrySeconds;
-                logger.LogError("Claim ditolak Hub ({ErrorCode})", ex.ErrorCode);
+                logger.LogError("The Hub rejected the claim ({ErrorCode})", ex.ErrorCode);
             }
             catch (AgentApiException ex) when (ex.StatusCode == HttpStatusCode.TooManyRequests)
             {
                 delaySeconds = RetryAfterSeconds(ex);
-                logger.LogWarning("Hub membatasi claim; mencoba lagi dalam {DelaySeconds} detik", delaySeconds);
+                logger.LogWarning("The Hub rate-limited the claim; retrying in {DelaySeconds} seconds", delaySeconds);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -181,7 +266,7 @@ public sealed class Worker(
             {
                 consecutiveFailures++;
                 delaySeconds = CalculateBackoffSeconds(consecutiveFailures);
-                logger.LogWarning(ex, "Claim gagal; mencoba lagi dalam {DelaySeconds} detik", delaySeconds);
+                logger.LogWarning(ex, "Claim failed; retrying in {DelaySeconds} seconds", delaySeconds);
             }
 
             await Task.Delay(TimeSpan.FromSeconds(delaySeconds), stoppingToken);
@@ -197,7 +282,7 @@ public sealed class Worker(
                 var dispatch = await outboxDispatcher.DispatchDueAsync(
                     identity.HubBaseAddress,
                     identity.BearerToken,
-                    AgentMetadata.Version,
+                    AgentProduct.Version,
                     DateTimeOffset.UtcNow,
                     stoppingToken);
                 if (dispatch.Delivered > 0 || dispatch.Rescheduled > 0)
@@ -216,7 +301,7 @@ public sealed class Worker(
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Dispatch outbox gagal; mencoba lagi dalam 2 detik");
+                logger.LogWarning(ex, "Outbox dispatch failed; retrying in 2 seconds");
             }
 
             await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
@@ -235,8 +320,10 @@ public sealed class Worker(
                     return identity;
                 }
 
+                await healthPublisher.ReportAwaitingPairingAsync(stoppingToken);
+
                 logger.LogWarning(
-                    "Agent belum di-enroll. Jalankan Agent.Service.exe enroll --hub-url <URL> --pairing-code <KODE>");
+                    "The agent is not enrolled. Run Agent.Service.exe enroll --hub-url <URL> --pairing-code <CODE>");
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -247,7 +334,7 @@ public sealed class Worker(
                 // File ada tetapi tidak dapat dibuka/dekripsi bukan keadaan yang akan pulih lewat
                 // retry jaringan. Tetap hidup agar operator bisa memperbaiki atau enroll ulang,
                 // tetapi jangan pernah mengirim request dengan identity setengah terbaca.
-                logger.LogCritical(ex, "Identitas agent tidak dapat dibaca");
+                logger.LogCritical(ex, "The agent identity could not be read");
             }
 
             await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
@@ -275,7 +362,7 @@ public sealed class Worker(
         {
             // Heartbeat tetap harus sampai ke Hub agar kegagalan inventaris terlihat sebagai
             // agent online tanpa printer, bukan salah didiagnosis sebagai agent mati.
-            logger.LogError(ex, "Gagal membaca inventaris printer");
+            logger.LogError(ex, "Failed to read the printer inventory");
             return [];
         }
     }
@@ -292,13 +379,31 @@ public sealed class Worker(
         {
             // Tanpa inventaris yang dapat dipercaya agent tidak boleh mengklaim job karena
             // PRINTER_NOT_FOUND setelah claim akan menghabiskan attempt secara sia-sia.
-            logger.LogError(ex, "Gagal membaca printer; claim dilewati");
+            logger.LogError(ex, "Failed to read printers; claim was skipped");
             return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         }
     }
 
     private static int NormalizeHeartbeatInterval(int? seconds) =>
         seconds is > 0 ? Math.Clamp(seconds.Value, 10, 300) : AgentRuntimeDefaults.HeartbeatIntervalSeconds;
+
+    private void LogNormalizedPrintSettings(AgentConfig config)
+    {
+        foreach (var binding in config.Printers ?? [])
+        {
+            if (binding.Print?.NormalizationWarnings is not { Count: > 0 } warnings)
+            {
+                continue;
+            }
+
+            // Config cacat tidak boleh memutus heartbeat; warning tetap dicatat agar
+            // operator dapat memperbaiki sumber datanya di Hub.
+            logger.LogWarning(
+                "Hub print settings for printer {PrinterName} were normalized: {Warnings}",
+                binding.WindowsName,
+                string.Join("; ", warnings));
+        }
+    }
 
     private static int CalculateBackoffSeconds(int failureCount)
     {

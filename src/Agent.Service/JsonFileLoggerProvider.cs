@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using Agent.Local;
 using Microsoft.Extensions.Logging;
 
 namespace Agent.Service;
@@ -37,7 +38,7 @@ internal sealed class JsonFileLoggerProvider(string directory, TimeProvider time
             return;
         }
 
-        var now = timeProvider.GetUtcNow();
+        var now = IndonesiaTime.Now(timeProvider);
         var entry = new AgentLogEntry(
             now,
             level.ToString(),

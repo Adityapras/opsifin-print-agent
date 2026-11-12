@@ -77,7 +77,7 @@ public sealed class CommandJournal(string directory)
             stream,
             RuntimeJsonContext.Default.CommandExecutionRecord,
             cancellationToken)
-            ?? throw new InvalidDataException($"Jurnal command {commandId} kosong.");
+            ?? throw new InvalidDataException($"Command journal {commandId} is empty.");
     }
 
     private string GetPath(Guid commandId) => Path.Combine(directory, $"{commandId:N}.json");

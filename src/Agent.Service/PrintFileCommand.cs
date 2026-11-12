@@ -40,13 +40,13 @@ internal static class PrintFileCommand
                 cancellation.Token);
 
             Console.WriteLine(
-                $"Dokumen masuk spooler. JobId={submission.SpoolerJobId}, halaman={submission.PageCount}.");
+                $"The document entered the spooler. JobId={submission.SpoolerJobId}, pages={submission.PageCount}.");
             if (args.Contains("--no-monitor", StringComparer.OrdinalIgnoreCase))
             {
                 return 0;
             }
 
-            Console.WriteLine("Memantau JobId dan kesehatan printer selama 60 detik setelah job hilang...");
+            Console.WriteLine("Monitoring the JobId and printer health for 60 seconds after the job disappears...");
             var monitor = new SpoolerJobMonitor(new Win32SpoolerStatusSource());
             var result = await monitor.MonitorAsync(
                 printer,
@@ -62,12 +62,12 @@ internal static class PrintFileCommand
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
-            Console.Error.WriteLine("Pengujian dibatalkan.");
+            Console.Error.WriteLine("The test was cancelled.");
             return 130;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Pengujian cetak gagal: {ex.Message}");
+            Console.Error.WriteLine($"The print test failed: {ex.Message}");
             return 1;
         }
         finally
@@ -113,6 +113,6 @@ internal static class PrintFileCommand
     }
 
     private static void WriteUsage() => Console.Error.WriteLine(
-        "Pemakaian: Agent.Service.exe print-file --file <PDF> --printer <NAMA> "
+        "Usage: Agent.Service.exe print-file --file <PDF> --printer <NAME> "
         + "[--copies 1] [--scale noscale|fit|shrink] [--no-monitor]");
 }

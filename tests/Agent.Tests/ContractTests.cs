@@ -20,4 +20,15 @@ public class ContractTests
 
         Assert.Contains($"  {path}", contract);
     }
+
+    [Fact]
+    public void Kontrak_memuat_metadata_aktivitas_cetak_dan_interval_source()
+    {
+        var contract = File.ReadAllText(ContractPath);
+
+        Assert.Contains("source_poll_interval_s:", contract);
+        Assert.Contains("display: { $ref: '#/components/schemas/JobDisplay' }", contract);
+        Assert.Contains("invoice_no: { type: string", contract);
+        Assert.Contains("item_type: { type: string", contract);
+    }
 }

@@ -16,9 +16,15 @@ public sealed class JobProcessorTests
         var fixture = await Fixture.CreateAsync(pdf);
         try
         {
+            var progress = new List<JobProgressUpdate>();
             var result = await fixture.Processor.ProcessAsync(
                 fixture.CreateJob(pdf, pages: 2),
                 "Simulated Printer",
+                (update, _) =>
+                {
+                    progress.Add(update);
+                    return Task.CompletedTask;
+                },
                 CancellationToken.None);
 
             Assert.Equal(JobProcessOutcome.Completed, result.Outcome);
@@ -37,6 +43,10 @@ public sealed class JobProcessorTests
             Assert.Contains("spooler_status", types);
             Assert.Contains("completed", types);
             Assert.DoesNotContain("print_error", types);
+            Assert.Contains(progress, update => update.Stage == JobProgressStages.Downloading);
+            Assert.Contains(progress, update => update.Stage == JobProgressStages.SendingToPrinter);
+            Assert.Contains(progress, update => update.Stage == JobProgressStages.Printing);
+            Assert.Contains(progress, update => update.Stage == JobProgressStages.VerifyingCompletion);
             Assert.False(Directory.EnumerateFiles(fixture.DocumentsDirectory).Any());
         }
         finally
@@ -95,6 +105,89 @@ public sealed class JobProcessorTests
                 CancellationToken.None);
             Assert.Contains(events, item => item.Event.Type == "spooled");
             Assert.DoesNotContain(events, item => item.Event.Type is "completed" or "print_error");
+        }
+        finally
+        {
+            fixture.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Kegagalan_snapshot_progress_tidak_menggagalkan_print_job()
+    {
+        var pdf = "%PDF-1.4\nprogress-observability"u8.ToArray();
+        var fixture = await Fixture.CreateAsync(pdf);
+        try
+        {
+            var result = await fixture.Processor.ProcessAsync(
+                fixture.CreateJob(pdf, pages: 1),
+                "Simulated Printer",
+                (_, _) => throw new IOException("Simulated local snapshot failure"),
+                CancellationToken.None);
+
+            Assert.Equal(JobProcessOutcome.Completed, result.Outcome);
+        }
+        finally
+        {
+            fixture.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Job_yang_sudah_hilang_sebelum_poll_pertama_tetap_diverifikasi_selesai()
+    {
+        var pdf = "%PDF-1.4\nfast-physical-printer"u8.ToArray();
+        var printSystem = new ImmediatelyCompletedPrintSystem();
+        var fixture = await Fixture.CreateAsync(pdf, printSystem, printSystem, printSystem);
+        try
+        {
+            var result = await fixture.Processor.ProcessAsync(
+                fixture.CreateJob(pdf, pages: 1),
+                "Fast Physical Printer",
+                CancellationToken.None);
+
+            Assert.Equal(JobProcessOutcome.Completed, result.Outcome);
+            var events = await fixture.Outbox.GetDueAsync(
+                DateTimeOffset.UtcNow.AddMinutes(1),
+                100,
+                CancellationToken.None);
+            Assert.Contains(events, item => item.Event.Type == "spooled");
+            Assert.Contains(events, item => item.Event.Type == "completed");
+            Assert.DoesNotContain(events, item => item.Event.Type == "print_error");
+        }
+        finally
+        {
+            fixture.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task Printer_interaktif_gagal_cepat_dengan_error_durable()
+    {
+        var pdf = "%PDF-1.4\ninteractive-printer"u8.ToArray();
+        var simulated = new SimulatedPrintSystem();
+        var fixture = await Fixture.CreateAsync(
+            pdf,
+            new InteractivePrinterPrintEngine(),
+            simulated,
+            simulated);
+        try
+        {
+            var result = await fixture.Processor.ProcessAsync(
+                fixture.CreateJob(pdf, pages: 1),
+                "Microsoft Print to PDF",
+                CancellationToken.None);
+
+            Assert.Equal(JobProcessOutcome.Failed, result.Outcome);
+            Assert.Equal("PRINTER_REQUIRES_INTERACTION", result.ErrorCode);
+            var events = await fixture.Outbox.GetDueAsync(
+                DateTimeOffset.UtcNow.AddMinutes(1),
+                100,
+                CancellationToken.None);
+            var error = Assert.Single(events, item => item.Event.Type == "print_error");
+            Assert.Equal(
+                "PRINTER_REQUIRES_INTERACTION",
+                error.Event.Data?.GetProperty("error_code").GetString());
         }
         finally
         {
@@ -225,5 +318,33 @@ public sealed class JobProcessorTests
             WasCancelled = true;
             return ValueTask.CompletedTask;
         }
+    }
+
+    private sealed class ImmediatelyCompletedPrintSystem : IPrintEngine, ISpoolerStatusSource, ISpoolerJobController
+    {
+        public ValueTask<PrintSubmission> SubmitAsync(
+            PrintRequest request,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(new PrintSubmission(3, request.ExpectedPageCount ?? 1));
+
+        public ValueTask<SpoolerObservation> ReadAsync(
+            string printerName,
+            uint spoolerJobId,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(new SpoolerObservation(false, 0, 0, 0, 0, 0));
+
+        public ValueTask CancelAsync(
+            string printerName,
+            uint spoolerJobId,
+            CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
+    }
+
+    private sealed class InteractivePrinterPrintEngine : IPrintEngine
+    {
+        public ValueTask<PrintSubmission> SubmitAsync(
+            PrintRequest request,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromException<PrintSubmission>(
+                new UnattendedPrintingNotSupportedException("Interactive printer test."));
     }
 }
