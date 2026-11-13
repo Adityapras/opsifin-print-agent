@@ -41,7 +41,7 @@ builder.Services.AddSingleton(new HttpClient
 {
     Timeout = TimeSpan.FromSeconds(30),
 });
-builder.Services.AddSingleton(new AgentUpdateHttpClient(new HttpClient
+builder.Services.AddSingleton(new AuthenticatedUpdateDownloader(new HttpClient
 {
     // Paket MSI jauh lebih besar daripada heartbeat/PDF metadata; timeout terpisah mencegah
     // koneksi client yang lambat menggagalkan update sehat setelah 30 detik.

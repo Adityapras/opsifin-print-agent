@@ -7,11 +7,10 @@ namespace Agent.Service;
 
 public sealed record UpdateScheduleResult(bool Accepted, string Message);
 
-public sealed record AgentUpdateHttpClient(HttpClient Client);
-
 public sealed class AgentUpdateCoordinator(
     ILogger<AgentUpdateCoordinator> logger,
-    AgentUpdateHttpClient updateHttpClient,
+    AuthenticatedUpdateDownloader updateDownloader,
+    DeviceIdentityStore identityStore,
     AgentUpdateStore updateStore,
     JobCoordinator jobCoordinator,
     EventOutbox outbox,
@@ -195,9 +194,13 @@ public sealed class AgentUpdateCoordinator(
 
         try
         {
-            using var response = await updateHttpClient.Client.GetAsync(
-                state.PackageUrl,
-                HttpCompletionOption.ResponseHeadersRead,
+            var identity = await identityStore.LoadAsync(cancellationToken)
+                ?? throw new InvalidOperationException("The Agent identity is unavailable for the authenticated update download.");
+            using var response = await updateDownloader.DownloadAsync(
+                identity.HubBaseAddress,
+                new Uri(state.PackageUrl, UriKind.Absolute),
+                identity.BearerToken,
+                AgentProduct.Version,
                 cancellationToken);
             response.EnsureSuccessStatusCode();
             if (response.Content.Headers.ContentLength is > MaximumPackageBytes)
