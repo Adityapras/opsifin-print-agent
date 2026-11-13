@@ -8,6 +8,7 @@ Paket juga menyertakan **Opsifin Agent Control**, aplikasi Windows modern untuk 
 status service/heartbeat, kontrol start-stop-restart, dan diagnostics tanpa command line.
 
 - PRD: [`docs/PRD.md`](docs/PRD.md) · ringkasan keputusan: [`docs/PRD-ringkasan-keputusan.md`](docs/PRD-ringkasan-keputusan.md)
+- Developer build & release guide: [`docs/DEVELOPER-BUILD-GUIDE.md`](docs/DEVELOPER-BUILD-GUIDE.md)
 - Kontrak API (salinan dari repo Hub): [`contracts/agent-v1.yaml`](contracts/agent-v1.yaml)
 - Hub: repo `opsifin-print-hub`
 
