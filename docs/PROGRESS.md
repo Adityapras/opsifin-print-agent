@@ -55,3 +55,12 @@ install `1.0.0`, pair from the GUI, print in simulation mode, and publish a smal
 - All 107 automated tests passed, including regression coverage for authenticated download and
   cross-origin/path token-leak prevention.
 - MSI SHA-256: `4c8fbca55db9f68d54c7eef7d8cd6b6fe0e24fdb85ea6a1ea220a3ec233417be`.
+
+## Authenticated OTA verification
+
+- Version `1.0.3` is the first OTA test package after the authenticated downloader bridge was
+  installed manually as `1.0.2`.
+- The visible Agent Control subtitle changes to **Windows print control center — OTA updates
+  verified** so the operator can confirm that the GUI binary was replaced.
+- All 107 automated tests passed before packaging.
+- MSI SHA-256: `e070f2f9a96e5bd36878059aa4cdf03b58f56b8ac88fae66670112649fd2b4d3`.
