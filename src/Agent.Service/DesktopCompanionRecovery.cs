@@ -33,25 +33,38 @@ internal sealed class DesktopCompanionRecovery(
             return;
         }
 
-        var sessions = await companionManager.StopInstalledInstancesAsync(cancellationToken);
-        foreach (var sessionId in sessions.Distinct())
+        try
         {
-            if (companionManager.TryStartTray(sessionId, out var error))
+            var sessions = await companionManager.StopInstalledInstancesAsync(cancellationToken);
+            foreach (var sessionId in sessions.Distinct())
             {
-                logger.LogInformation(
-                    "Agent Control was restarted in Windows session {SessionId} after update {TargetVersion}",
-                    sessionId,
-                    update.TargetVersion);
+                if (companionManager.TryStartTray(sessionId, out var error))
+                {
+                    logger.LogInformation(
+                        "Agent Control was restarted in Windows session {SessionId} after update {TargetVersion}",
+                        sessionId,
+                        update.TargetVersion);
+                }
+                else
+                {
+                    // Service dan printing tetap sehat bila desktop session menolak relaunch.
+                    // Shortcut dan HKLM Run masih menyediakan jalur recovery manual/login berikutnya.
+                    logger.LogWarning(
+                        "Agent Control could not be restarted in Windows session {SessionId}: {RecoveryError}",
+                        sessionId,
+                        error);
+                }
             }
-            else
-            {
-                // Service dan printing tetap sehat bila desktop session menolak relaunch.
-                // Shortcut dan HKLM Run masih menyediakan jalur recovery manual/login berikutnya.
-                logger.LogWarning(
-                    "Agent Control could not be restarted in Windows session {SessionId}: {RecoveryError}",
-                    sessionId,
-                    error);
-            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Windows sedang menghentikan service saat recovery berlangsung.
+        }
+        catch (Exception exception)
+        {
+            // Desktop recovery adalah fitur pendamping. Kegagalan apa pun tidak boleh
+            // membatalkan startup service atau memutus print pipeline.
+            logger.LogWarning(exception, "Desktop companion recovery failed safely");
         }
     }
 

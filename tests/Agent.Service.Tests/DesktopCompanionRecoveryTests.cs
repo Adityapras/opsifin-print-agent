@@ -59,6 +59,29 @@ public sealed class DesktopCompanionRecoveryTests
         }
     }
 
+    [Fact]
+    public async Task Kegagalan_companion_tidak_menggagalkan_startup_service()
+    {
+        var directory = CreateTestDirectory();
+        try
+        {
+            var store = CreateStore(directory);
+            await store.SaveAsync(CreateState(AgentUpdateStatuses.Installing), CancellationToken.None);
+            var recovery = new DesktopCompanionRecovery(
+                store,
+                new FailingCompanionManager(),
+                NullLogger<DesktopCompanionRecovery>.Instance);
+
+            var exception = await Record.ExceptionAsync(() => recovery.StartAsync(CancellationToken.None));
+
+            Assert.Null(exception);
+        }
+        finally
+        {
+            DeleteTestDirectory(directory);
+        }
+    }
+
     private static AgentUpdateStore CreateStore(string directory) => new(
         Path.Combine(directory, "update-state.json"),
         Path.Combine(directory, "update-request.json"));
@@ -107,5 +130,14 @@ public sealed class DesktopCompanionRecoveryTests
             StartedSessions.Add(sessionId);
             return true;
         }
+    }
+
+    private sealed class FailingCompanionManager : IDesktopCompanionManager
+    {
+        public Task<IReadOnlyCollection<int>> StopInstalledInstancesAsync(CancellationToken cancellationToken) =>
+            throw new EntryPointNotFoundException("test interop failure");
+
+        public bool TryStartTray(int sessionId, out string? error) =>
+            throw new EntryPointNotFoundException("test interop failure");
     }
 }

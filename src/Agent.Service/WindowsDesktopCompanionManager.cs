@@ -51,6 +51,24 @@ internal sealed class WindowsDesktopCompanionManager(
 
     public bool TryStartTray(int sessionId, out string? error)
     {
+        try
+        {
+            return TryStartTrayCore(sessionId, out error);
+        }
+        catch (Exception exception)
+        {
+            // Interop desktop tidak boleh menjadi single point of failure untuk service.
+            error = exception.Message;
+            logger.LogWarning(
+                exception,
+                "Agent Control relaunch failed safely in Windows session {SessionId}",
+                sessionId);
+            return false;
+        }
+    }
+
+    private bool TryStartTrayCore(int sessionId, out string? error)
+    {
         error = null;
         if (!File.Exists(controlPath))
         {
@@ -124,7 +142,7 @@ internal sealed class WindowsDesktopCompanionManager(
     private static string LastWin32Error() =>
         new Win32Exception(Marshal.GetLastWin32Error()).Message;
 
-    [DllImport("wtsapi32.dll", SetLastError = true)]
+    [DllImport("wtsapi32.dll", EntryPoint = "WTSQueryUserToken", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool WtsQueryUserToken(uint sessionId, out IntPtr token);
 
