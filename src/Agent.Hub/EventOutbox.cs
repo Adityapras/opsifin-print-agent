@@ -136,7 +136,7 @@ public sealed class EventOutbox
 
         if (eventIds.Count > 100)
         {
-            throw new ArgumentOutOfRangeException(nameof(eventIds), "Maksimal 100 event per batch.");
+            throw new ArgumentOutOfRangeException(nameof(eventIds), "A batch can contain at most 100 events.");
         }
 
         await using var connection = await OpenConnectionAsync(cancellationToken);

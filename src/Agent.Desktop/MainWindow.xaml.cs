@@ -14,7 +14,21 @@ public partial class MainWindow : Window
         DataContext = viewModel;
     }
 
-    private async void OnLoaded(object sender, RoutedEventArgs e) => await viewModel.StartAsync();
+    private async void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await viewModel.StartAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            // Window ditutup ketika initial refresh masih berjalan.
+        }
+        catch (Exception exception)
+        {
+            viewModel.ReportUnexpectedError(exception);
+        }
+    }
 
     private void OnClosing(object? sender, CancelEventArgs e) => viewModel.Dispose();
 

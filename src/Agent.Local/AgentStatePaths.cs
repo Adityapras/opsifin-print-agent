@@ -12,6 +12,8 @@ public static class AgentStatePaths
 
     public static string StateDirectory { get; } = Path.Combine(RootDirectory, "state");
 
+    public static string ArchiveDirectory { get; } = Path.Combine(RootDirectory, "archives");
+
     public static string IdentityFile { get; } = Path.Combine(StateDirectory, "identity.json");
 
     public static string HealthFile { get; } = Path.Combine(StateDirectory, "health.json");
@@ -38,7 +40,18 @@ public static class AgentStatePaths
 
     public static void EnsureSecureStateDirectory()
     {
-        Directory.CreateDirectory(StateDirectory);
+        EnsureSecureDirectory(StateDirectory);
+    }
+
+    public static void EnsureSecureArchiveDirectory()
+    {
+        EnsureSecureDirectory(ArchiveDirectory);
+    }
+
+    public static void EnsureSecureDirectory(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        Directory.CreateDirectory(path);
 
         var inheritance = InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit;
         var security = new DirectorySecurity();
@@ -55,6 +68,6 @@ public static class AgentStatePaths
             inheritance,
             PropagationFlags.None,
             AccessControlType.Allow));
-        new DirectoryInfo(StateDirectory).SetAccessControl(security);
+        new DirectoryInfo(path).SetAccessControl(security);
     }
 }

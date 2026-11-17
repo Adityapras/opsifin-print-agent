@@ -224,7 +224,7 @@ public sealed class AgentHubClient(HttpClient httpClient)
             // untuk menentukan retry tanpa memasukkan body tak tepercaya ke log.
         }
 
-        var message = envelope?.Error.Message ?? $"Hub mengembalikan HTTP {(int)response.StatusCode}.";
+        var message = envelope?.Error.Message ?? $"The Hub returned HTTP {(int)response.StatusCode}.";
         var retryAfter = response.Headers.RetryAfter?.Delta;
         if (retryAfter is null && response.Headers.RetryAfter?.Date is DateTimeOffset retryDate)
         {

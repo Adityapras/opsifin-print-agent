@@ -52,6 +52,7 @@ builder.Services.AddSingleton<SignedDocumentDownloader>();
 builder.Services.AddSingleton<DeviceIdentityStore>();
 builder.Services.AddSingleton<AgentHealthStore>();
 builder.Services.AddSingleton<AgentUpdateStore>();
+builder.Services.AddSingleton<AgentStorageCleaner>();
 builder.Services.AddSingleton<AgentHealthPublisher>();
 builder.Services.AddSingleton(_ => new EventOutbox(AgentStatePaths.OutboxDatabase));
 builder.Services.AddSingleton<EventOutboxDispatcher>();
@@ -93,6 +94,7 @@ builder.Services.AddSingleton<AgentCommandHandler>();
 builder.Services.AddSingleton<AgentUpdateCoordinator>();
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<AgentUpdateCoordinator>());
+builder.Services.AddHostedService<AgentStorageMaintenance>();
 
 var host = builder.Build();
 host.Run();

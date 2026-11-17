@@ -132,7 +132,7 @@ public sealed class SpoolerCompletionTracker
     private SpoolerMonitorResult Result(SpoolerMonitorOutcome outcome, string detail)
     {
         var observation = lastObservation
-            ?? throw new InvalidOperationException("Belum ada observasi spooler.");
+            ?? throw new InvalidOperationException("No spooler observation is available.");
         var jobObservation = lastJobObservation ?? observation;
         return new SpoolerMonitorResult(
             outcome,

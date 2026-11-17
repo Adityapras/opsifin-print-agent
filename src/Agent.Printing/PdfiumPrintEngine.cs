@@ -116,7 +116,7 @@ public sealed class PdfiumPrintEngine : IPrintEngine
             {
                 if (PdfiumNative.SetPrintMode(PdfiumPrintModeEmf) == 0)
                 {
-                    throw new InvalidOperationException("PDFium menolak print mode EMF.");
+                    throw new InvalidOperationException("PDFium rejected EMF print mode.");
                 }
 
                 for (var copy = 0; copy < request.Copies; copy++)

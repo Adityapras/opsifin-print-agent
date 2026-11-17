@@ -237,7 +237,7 @@ public sealed class AgentCommandHandler(
             attachment,
             cancellationToken);
         logger.LogInformation(
-            "Command {CommandId} ({CommandType}) dilaporkan {CommandStatus}",
+            "Command {CommandId} ({CommandType}) was reported as {CommandStatus}",
             record.CommandId,
             record.CommandType,
             record.ResultStatus);

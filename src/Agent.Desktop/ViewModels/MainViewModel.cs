@@ -18,10 +18,12 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
     private readonly AgentHealthStore healthStore = new();
     private readonly AgentRuntimeSettingsStore runtimeSettingsStore = new();
     private readonly AgentUpdateStore updateStore = new();
+    private readonly AgentStateResetter stateResetter = new();
     private readonly WindowsServiceManager serviceManager = new();
     private readonly LocalLogReader logReader = new();
     private readonly SystemCheckService systemCheckService = new();
     private readonly SystemCheckReportExporter systemCheckExporter = new();
+    private readonly UiErrorReporter uiErrorReporter = new();
     private readonly SemaphoreSlim refreshGate = new(1, 1);
     private readonly CancellationTokenSource lifetime = new();
     private AgentWindowsServiceStatus latestServiceStatus = new(false, "Not installed", false);
@@ -70,20 +72,22 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
         ShowSetupCommand = new RelayCommand(() => CurrentPage = "setup");
         ShowSystemCheckCommand = new RelayCommand(() => CurrentPage = "system-check");
         ShowDiagnosticsCommand = new RelayCommand(() => CurrentPage = "diagnostics");
-        RefreshCommand = new AsyncRelayCommand(RefreshAsync, () => !IsBusy);
-        PairCommand = new AsyncRelayCommand(PairAsync, () => !IsBusy && !IsPaired);
-        ResetPairingCommand = new AsyncRelayCommand(ResetPairingAsync, () => !IsBusy && IsPaired);
-        StartServiceCommand = new AsyncRelayCommand(StartServiceAsync, () => !IsBusy && IsServiceInstalled && !IsServiceRunning);
-        RestartServiceCommand = new AsyncRelayCommand(RestartServiceAsync, () => !IsBusy && IsServiceInstalled && IsServiceRunning);
-        StopServiceCommand = new AsyncRelayCommand(StopServiceAsync, () => !IsBusy && IsServiceInstalled && IsServiceRunning);
-        ToggleSimulationModeCommand = new AsyncRelayCommand(ToggleSimulationModeAsync, () => !IsBusy);
+        RefreshCommand = CreateAsyncCommand(RefreshAsync, () => !IsBusy);
+        PairCommand = CreateAsyncCommand(PairAsync, () => !IsBusy && !IsPaired);
+        ResetPairingCommand = CreateAsyncCommand(ResetPairingAsync, () => !IsBusy && IsPaired);
+        StartServiceCommand = CreateAsyncCommand(StartServiceAsync, () => !IsBusy && IsServiceInstalled && !IsServiceRunning);
+        RestartServiceCommand = CreateAsyncCommand(RestartServiceAsync, () => !IsBusy && IsServiceInstalled && IsServiceRunning);
+        StopServiceCommand = CreateAsyncCommand(StopServiceAsync, () => !IsBusy && IsServiceInstalled && IsServiceRunning);
+        ToggleSimulationModeCommand = CreateAsyncCommand(ToggleSimulationModeAsync, () => !IsBusy);
         InstallUpdateCommand = new AsyncRelayCommand(
             InstallUpdateAsync,
-            () => !IsBusy && latestUpdate?.Status == AgentUpdateStatuses.Ready);
-        RunSystemCheckCommand = new AsyncRelayCommand(RunSystemCheckAsync, () => !IsBusy);
+            () => !IsBusy && latestUpdate?.Status == AgentUpdateStatuses.Ready,
+            ReportUnexpectedError);
+        RunSystemCheckCommand = CreateAsyncCommand(RunSystemCheckAsync, () => !IsBusy);
         ExportSystemCheckCommand = new AsyncRelayCommand(
             ExportSystemCheckAsync,
-            () => !IsBusy && latestSystemCheck is not null);
+            () => !IsBusy && latestSystemCheck is not null,
+            ReportUnexpectedError);
         OpenLogsCommand = new RelayCommand(OpenLogsFolder);
     }
 
@@ -457,6 +461,14 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
         lifetime.Cancel();
     }
 
+    internal void ReportUnexpectedError(Exception exception)
+    {
+        uiErrorReporter.Report(exception);
+        LastError = "Agent Control encountered an unexpected error. Review the recent logs and try the operation again.";
+        SetOperation(LastError, "danger");
+        CurrentPage = "diagnostics";
+    }
+
     private async Task RunRefreshLoopAsync(CancellationToken cancellationToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
@@ -470,6 +482,7 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
                 }
                 catch (Exception ex)
                 {
+                    uiErrorReporter.Report(ex);
                     SetOperation($"Local status could not be refreshed: {ex.Message}", "warning");
                 }
             }
@@ -477,6 +490,10 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             // Menutup jendela menghentikan polling status secara normal.
+        }
+        catch (Exception exception)
+        {
+            ReportUnexpectedError(exception);
         }
     }
 
@@ -948,9 +965,27 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
 
     private async Task ResetPairingAsync()
     {
+        if (ActivePrintJobs.Count > 0)
+        {
+            SetOperation(
+                "Pairing cannot be reset while printing is active. Wait for every print job to finish, then try again.",
+                "warning");
+            CurrentPage = "setup";
+            return;
+        }
+
+        if (latestUpdate is not null && !AgentUpdateStatuses.IsTerminal(latestUpdate.Status))
+        {
+            SetOperation(
+                $"Pairing cannot be reset while update {latestUpdate.TargetVersion} is {latestUpdate.Status.Replace('_', ' ')}.",
+                "warning");
+            CurrentPage = "setup";
+            return;
+        }
+
         var confirmation = System.Windows.MessageBox.Show(
-            "Pairing again will stop the service, close any console-mode agent, and archive the previous local identity.\n\n"
-            + "Before continuing, revoke or remove the previous agent in the Hub to avoid duplicate devices.\n\n"
+            "Pairing again will stop the service and archive all state owned by the previous Agent, including pending events, commands, updates, logs, and local printing settings.\n\n"
+            + "The new Agent will start in Production mode with clean local storage. Before continuing, revoke or remove the previous Agent in the Hub.\n\n"
             + "Continue with the local pairing reset?",
             "Reset Opsifin Print Agent pairing",
             MessageBoxButton.YesNo,
@@ -964,35 +999,56 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
         IsBusy = true;
         CurrentPage = "setup";
         SetOperation("Stopping the service and previous agent processes…", "neutral");
+        await refreshGate.WaitAsync();
+        var serviceNeedsRestart = false;
         try
         {
             if (IsServiceInstalled)
             {
                 await serviceManager.StopAsync();
+                serviceNeedsRestart = true;
             }
 
             var consoleProcesses = await serviceManager.StopRemainingConsoleAgentsAsync();
-            var archivePath = identityStore.ArchiveExisting();
-            healthStore.Remove();
+            var reset = stateResetter.ArchiveAndCreateFreshState(latestIdentity?.AgentId);
 
             if (IsServiceInstalled)
             {
                 await serviceManager.StartAsync();
+                serviceNeedsRestart = false;
             }
 
             PairingCode = string.Empty;
             SetOperation(
-                archivePath is null
-                    ? "The local identity is already empty. Create a new pairing code in the Hub and complete the form above."
-                    : $"The previous pairing was reset. {consoleProcesses} console process(es) were stopped. Create a new Hub pairing code and connect again.",
+                reset.StateWasPresent
+                    ? $"The previous Agent state was archived and a clean Production state was created. {consoleProcesses} console process(es) were stopped. Create a new Hub pairing code and connect again."
+                    : "A clean Production state was created. Create a new pairing code in the Hub and complete the form above.",
                 "success");
         }
         catch (Exception ex)
         {
-            SetOperation($"Pairing reset failed: {ex.Message}", "danger");
+            var recoveryMessage = string.Empty;
+            if (serviceNeedsRestart)
+            {
+                try
+                {
+                    await serviceManager.StartAsync();
+                    serviceNeedsRestart = false;
+                    recoveryMessage = " The Windows Service was started again.";
+                }
+                catch (Exception recoveryException)
+                {
+                    uiErrorReporter.Report(recoveryException);
+                    recoveryMessage = " The Windows Service could not be restarted; use Service controls after reviewing diagnostics.";
+                }
+            }
+
+            uiErrorReporter.Report(ex);
+            SetOperation($"Pairing reset failed: {ex.Message}.{recoveryMessage}", "danger");
         }
         finally
         {
+            refreshGate.Release();
             IsBusy = false;
             await RefreshAsync();
         }
@@ -1183,6 +1239,9 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
         RunSystemCheckCommand.RaiseCanExecuteChanged();
         ExportSystemCheckCommand.RaiseCanExecuteChanged();
     }
+
+    private AsyncRelayCommand CreateAsyncCommand(Func<Task> execute, Func<bool> canExecute) =>
+        new(execute, canExecute, ReportUnexpectedError);
 }
 
 internal sealed record DetectedPrinterViewModel(

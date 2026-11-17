@@ -288,7 +288,7 @@ public sealed class Worker(
                 if (dispatch.Delivered > 0 || dispatch.Rescheduled > 0)
                 {
                     logger.LogInformation(
-                        "Outbox: {Delivered} event terkirim, {Rescheduled} dijadwalkan ulang",
+                        "Outbox: {Delivered} event(s) delivered, {Rescheduled} rescheduled",
                         dispatch.Delivered,
                         dispatch.Rescheduled);
                 }

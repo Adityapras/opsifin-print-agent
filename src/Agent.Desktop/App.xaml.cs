@@ -10,6 +10,7 @@ public partial class App : System.Windows.Application
 {
     private Mutex? trayMutex;
     private TrayIconService? trayIcon;
+    private ControlInstanceCoordinator? controlInstance;
 
     public App()
     {
@@ -27,7 +28,23 @@ public partial class App : System.Windows.Application
         var trayOnly = e.Args.Contains("--tray", StringComparer.OrdinalIgnoreCase);
         if (controlRequested)
         {
+            if (!IsAdministrator())
+            {
+                LaunchElevatedControlCenter();
+                Shutdown();
+                return;
+            }
+
+            controlInstance = new ControlInstanceCoordinator();
+            if (!controlInstance.TryAcquire())
+            {
+                controlInstance.TryActivateExisting(TimeSpan.FromSeconds(1));
+                Shutdown();
+                return;
+            }
+
             OpenControlCenter();
+            controlInstance.StartListening(ActivateControlCenter);
             return;
         }
 
@@ -47,6 +64,7 @@ public partial class App : System.Windows.Application
     {
         trayIcon?.Dispose();
         trayMutex?.Dispose();
+        controlInstance?.Dispose();
         base.OnExit(e);
     }
 
@@ -71,13 +89,6 @@ public partial class App : System.Windows.Application
 
     private void OpenControlCenter()
     {
-        if (!IsAdministrator())
-        {
-            LaunchElevatedControlCenter();
-            Shutdown();
-            return;
-        }
-
         var window = new MainWindow();
         MainWindow = window;
         window.Show();
@@ -88,6 +99,14 @@ public partial class App : System.Windows.Application
     {
         try
         {
+            var coordinator = new ControlInstanceCoordinator();
+            if (coordinator.TryActivateExisting(TimeSpan.FromMilliseconds(400)))
+            {
+                coordinator.Dispose();
+                return;
+            }
+
+            coordinator.Dispose();
             Process.Start(new ProcessStartInfo
             {
                 FileName = Environment.ProcessPath
@@ -108,6 +127,30 @@ public partial class App : System.Windows.Application
         {
             trayIcon?.ShowMessage("Agent Control could not be opened", ex.Message);
         }
+    }
+
+    private void ActivateControlCenter()
+    {
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (MainWindow is not { } window)
+            {
+                return;
+            }
+
+            if (window.WindowState == WindowState.Minimized)
+            {
+                window.WindowState = WindowState.Normal;
+            }
+
+            window.Show();
+            window.Activate();
+            // Toggle Topmost membuat Windows membawa window elevated ke depan tanpa
+            // meninggalkannya selalu di atas aplikasi lain.
+            window.Topmost = true;
+            window.Topmost = false;
+            window.Focus();
+        });
     }
 
     private static bool IsAdministrator()
