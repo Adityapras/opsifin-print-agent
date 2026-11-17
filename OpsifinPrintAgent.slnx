@@ -11,6 +11,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Agent.Desktop.Tests/Agent.Desktop.Tests.csproj" />
     <Project Path="tests/Agent.Local.Tests/Agent.Local.Tests.csproj" />
+    <Project Path="tests/Agent.Service.Tests/Agent.Service.Tests.csproj" />
     <Project Path="tests/Agent.Tests/Agent.Tests.csproj" />
   </Folder>
 </Solution>

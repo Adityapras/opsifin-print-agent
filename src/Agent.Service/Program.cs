@@ -92,6 +92,8 @@ builder.Services.AddSingleton<JobProcessor>();
 builder.Services.AddSingleton<JobCoordinator>();
 builder.Services.AddSingleton<AgentCommandHandler>();
 builder.Services.AddSingleton<AgentUpdateCoordinator>();
+builder.Services.AddSingleton<IDesktopCompanionManager, WindowsDesktopCompanionManager>();
+builder.Services.AddHostedService<DesktopCompanionRecovery>();
 builder.Services.AddHostedService<Worker>();
 builder.Services.AddHostedService(provider => provider.GetRequiredService<AgentUpdateCoordinator>());
 builder.Services.AddHostedService<AgentStorageMaintenance>();
