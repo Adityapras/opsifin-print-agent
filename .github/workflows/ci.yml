@@ -26,5 +26,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: opsifin-print-agent-msi
-          path: dist/*.msi
+          name: opsifin-print-agent-installers
+          path: |
+            dist/*.exe
+            dist/*.msi

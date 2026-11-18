@@ -37,22 +37,30 @@ try {
     dotnet build installer\Agent.Installer.wixproj -c Release @versionArguments
     if ($LASTEXITCODE -ne 0) { throw 'MSI build failed.' }
 
+    dotnet build installer\Agent.Bootstrapper.wixproj -c Release @versionArguments
+    if ($LASTEXITCODE -ne 0) { throw 'Setup EXE build failed.' }
+
     $resolvedVersion = $Version
     if ([string]::IsNullOrWhiteSpace($resolvedVersion)) {
         [xml]$buildProperties = Get-Content -LiteralPath 'Directory.Build.props'
         $resolvedVersion = $buildProperties.Project.PropertyGroup.Version
     }
 
-    $installerPath = Join-Path $repositoryRoot "dist\OpsifinPrintAgent-Setup-$resolvedVersion-win-x64.msi"
-    if (-not (Test-Path -LiteralPath $installerPath)) {
-        throw "The expected installer was not created: $installerPath"
+    $msiPath = Join-Path $repositoryRoot "dist\OpsifinPrintAgent-Setup-$resolvedVersion-win-x64.msi"
+    $setupPath = Join-Path $repositoryRoot "dist\OpsifinPrintAgent-Setup-$resolvedVersion-win-x64.exe"
+    foreach ($path in @($msiPath, $setupPath)) {
+        if (-not (Test-Path -LiteralPath $path)) {
+            throw "The expected installer was not created: $path"
+        }
     }
 
-    $hash = Get-FileHash -LiteralPath $installerPath -Algorithm SHA256
     Write-Host ''
-    Write-Host 'Installer is ready:' -ForegroundColor Green
-    Write-Host $installerPath
-    Write-Host "SHA-256: $($hash.Hash.ToLowerInvariant())"
+    Write-Host 'Installers are ready:' -ForegroundColor Green
+    foreach ($path in @($setupPath, $msiPath)) {
+        $hash = Get-FileHash -LiteralPath $path -Algorithm SHA256
+        Write-Host $path
+        Write-Host "SHA-256: $($hash.Hash.ToLowerInvariant())"
+    }
 } finally {
     Pop-Location
 }

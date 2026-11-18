@@ -3,6 +3,7 @@
   <PropertyGroup>
     <OutputName>OpsifinPrintAgent</OutputName>
     <Platform>x64</Platform>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <AgentPublishDir Condition="'$(AgentPublishDir)' == ''">$(MSBuildThisFileDirectory)..\artifacts\package\agent</AgentPublishDir>
     <ControlPublishDir Condition="'$(ControlPublishDir)' == ''">$(MSBuildThisFileDirectory)..\artifacts\package\control</ControlPublishDir>
     <UpdaterPublishDir Condition="'$(UpdaterPublishDir)' == ''">$(MSBuildThisFileDirectory)..\artifacts\package\updater</UpdaterPublishDir>
@@ -16,6 +17,10 @@
 
   <ItemGroup>
     <PackageReference Include="WixToolset.Util.wixext" Version="6.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="Package.wxs" />
   </ItemGroup>
 
   <Target Name="CreateSingleFileDistribution" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">

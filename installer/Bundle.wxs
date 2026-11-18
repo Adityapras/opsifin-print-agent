@@ -1,0 +1,44 @@
+<Wix
+  xmlns="http://wixtoolset.org/schemas/v4/wxs"
+  xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+  <Bundle
+    Name="Opsifin Print Agent Setup"
+    Manufacturer="Opsigo"
+    Version="$(var.ProductVersion)"
+    UpgradeCode="878C6026-EEF5-4131-A7BC-703A3FADDD10"
+    Compressed="yes"
+    DisableModify="yes"
+    DisableRemove="yes"
+    IconSourceFile="$(var.BrandAssetsDir)\opsifin-agent.ico">
+
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication
+        Theme="hyperlinkLargeLicense"
+        LicenseUrl=""
+        LogoFile="$(var.BrandAssetsDir)\opsifin-agent.png"
+        ShowVersion="yes"
+        SuppressOptionsUI="yes"
+        LaunchTarget="[ProgramFiles6432Folder]Opsigo\Opsifin Print Agent\Opsifin.Agent.Control.exe"
+        LaunchWorkingFolder="[ProgramFiles6432Folder]Opsigo\Opsifin Print Agent" />
+    </BootstrapperApplication>
+
+    <bal:Condition
+      Condition="VersionNT64 &gt;= v10.0"
+      Message="Opsifin Print Agent requires 64-bit Windows 10, Windows 11, or Windows Server 2016 and later." />
+
+    <Chain>
+      <MsiPackage
+        Id="OpsifinPrintAgentMsi"
+        SourceFile="$(var.MsiPath)"
+        Compressed="yes"
+        Visible="yes"
+        Vital="yes">
+        <MsiProperty Name="OPSIFIN_BUNDLE_INSTALL" Value="1" />
+        <MsiProperty
+          Name="OPSIFIN_LAUNCH_AFTER_INSTALL"
+          Value="1"
+          Condition="WixBundleUILevel = 4" />
+      </MsiPackage>
+    </Chain>
+  </Bundle>
+</Wix>

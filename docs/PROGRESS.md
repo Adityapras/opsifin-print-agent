@@ -10,14 +10,14 @@ Last updated: 12 November 2026
   monitoring, durable event delivery, remote commands, and safe updates.
 - Opsifin Agent Control provides pairing, service/Hub health, printer inventory, active print jobs,
   simulation mode, diagnostics, software update status, and system tray access.
-- The installer is one self-contained MSI. Users do not receive a publish folder and do not need a
-  command line.
+- Manual client installation uses one self-contained Setup EXE. The embedded MSI remains the
+  installation engine and the package used by Print Hub OTA.
 
 ## Simplified release flow
 
 1. Any developer or CI runner runs `.\tools\build-installer.ps1` on Windows.
-2. The output is `dist\OpsifinPrintAgent-Setup-<version>-win-x64.msi`.
-3. The operator uploads that single MSI to Print Hub.
+2. The output contains a client Setup EXE and an OTA MSI under `dist`.
+3. The operator gives the EXE to clients and uploads the MSI to Print Hub.
 4. Hub calculates SHA-256 and publishes the update.
 5. Agent downloads over HTTPS, checks SHA-256, waits until printing is idle, installs silently, and
    reports the installed version through heartbeat.

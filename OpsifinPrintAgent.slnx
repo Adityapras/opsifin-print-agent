@@ -8,6 +8,10 @@
     <Project Path="src/Agent.Service/Agent.Service.csproj" />
     <Project Path="src/Agent.Updater/Agent.Updater.csproj" />
   </Folder>
+  <Folder Name="/installer/">
+    <Project Path="installer/Agent.Bootstrapper.wixproj" />
+    <Project Path="installer/Agent.Installer.wixproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Agent.Desktop.Tests/Agent.Desktop.Tests.csproj" />
     <Project Path="tests/Agent.Local.Tests/Agent.Local.Tests.csproj" />

@@ -1,4 +1,6 @@
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix
+  xmlns="http://wixtoolset.org/schemas/v4/wxs"
+  xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Package
     Name="Opsifin Print Agent"
     Manufacturer="Opsigo"
@@ -10,6 +12,19 @@
     <MediaTemplate EmbedCab="yes" />
     <Icon Id="OpsifinAgentIcon.ico" SourceFile="$(var.BrandAssetsDir)\opsifin-agent.ico" />
     <Property Id="ARPPRODUCTICON" Value="OpsifinAgentIcon.ico" />
+
+    <!-- Setup EXE menutup binary GUI/tray lama sebelum menggantinya. OTA MSI tidak
+         memakai property ini karena lifecycle-nya ditangani service updater. -->
+    <util:CloseApplication
+      Id="CloseAgentControl"
+      Target="Opsifin.Agent.Control.exe"
+      Description="Opsifin Agent Control must close before the update can continue."
+      Condition="OPSIFIN_BUNDLE_INSTALL = 1"
+      CloseMessage="yes"
+      ElevatedCloseMessage="yes"
+      Timeout="5"
+      TerminateProcess="0"
+      RebootPrompt="no" />
 
     <StandardDirectory Id="ProgramFiles6432Folder">
       <Directory Id="OpsigoDirectory" Name="Opsigo">
@@ -38,7 +53,7 @@
       <Custom
         Action="LaunchAgentControl"
         After="InstallFinalize"
-        Condition="NOT (REMOVE~=&quot;ALL&quot;) AND UILevel &gt;= 4" />
+        Condition="NOT (REMOVE~=&quot;ALL&quot;) AND (UILevel &gt;= 4 OR OPSIFIN_LAUNCH_AFTER_INSTALL = 1)" />
     </InstallExecuteSequence>
   </Package>
 

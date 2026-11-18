@@ -130,7 +130,7 @@ ulang versi MSI yang pernah di-upload atau dipublish di Hub.
 Untuk release resmi, ubah versi di `Directory.Build.props` dan commit perubahan tersebut. Parameter
 `-Version` pada script hanya cocok untuk build sementara karena tidak mengubah source version.
 
-## 6. Membuat installer MSI
+## 6. Membuat installer EXE dan MSI
 
 Dari root repository, jalankan:
 
@@ -144,15 +144,19 @@ Script akan:
 2. publish Windows Service Native AOT;
 3. publish Agent Control;
 4. publish updater;
-5. build installer WiX;
-6. menyalin satu MSI ke folder `dist`;
-7. menghitung SHA-256 MSI.
+5. build MSI sebagai installation engine dan paket OTA;
+6. build WiX Burn Setup EXE untuk instalasi client;
+7. menyalin EXE dan MSI ke folder `dist`;
+8. menghitung SHA-256 keduanya.
 
 Hasil build:
 
 ```text
+dist\OpsifinPrintAgent-Setup-<version>-win-x64.exe
 dist\OpsifinPrintAgent-Setup-<version>-win-x64.msi
 ```
+
+Gunakan EXE untuk fresh install/upgrade manual dan MSI untuk upload ke Print Hub.
 
 Contoh output sukses:
 
@@ -161,8 +165,10 @@ Build succeeded.
 0 Warning(s)
 0 Error(s)
 
-Installer is ready:
-D:\Dev\opsifin-print-agent\dist\OpsifinPrintAgent-Setup-1.0.4-win-x64.msi
+Installers are ready:
+D:\Dev\opsifin-print-agent\dist\OpsifinPrintAgent-Setup-1.0.8-win-x64.exe
+SHA-256: <hash>
+D:\Dev\opsifin-print-agent\dist\OpsifinPrintAgent-Setup-1.0.8-win-x64.msi
 SHA-256: <hash>
 ```
 
@@ -263,9 +269,9 @@ Setelah workflow selesai:
 1. buka repository GitHub;
 2. buka tab **Actions**;
 3. pilih workflow run yang berhasil;
-4. download artifact **opsifin-print-agent-msi**;
+4. download artifact **opsifin-print-agent-installers**;
 5. ekstrak ZIP artifact;
-6. gunakan MSI di dalamnya untuk release Hub.
+6. gunakan EXE untuk client dan MSI untuk release Hub.
 
 Artifact CI adalah output sementara. MSI production tetap dikelola melalui Print Hub, bukan
 disimpan di Git repository.

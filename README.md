@@ -73,9 +73,12 @@ aturan bisnis tetap dikirim oleh Hub melalui remote config agar seluruh PC konsi
 Publish Native AOT wajib dijalankan di Windows dengan .NET 10 SDK dan Visual Studio Build
 Tools workload **Desktop development with C++**.
 
-Build MSI Release juga menghasilkan satu artefak distribusi mandiri di
-`dist/OpsifinPrintAgent-Setup-<version>-win-x64.msi`. Hanya file MSI tersebut yang diberikan
-kepada user; folder `artifacts/package` adalah input build internal dan tidak perlu dikirim.
+Build Release menghasilkan dua artefak mandiri:
+
+- `dist/OpsifinPrintAgent-Setup-<version>-win-x64.exe` untuk instalasi manual oleh client;
+- `dist/OpsifinPrintAgent-Setup-<version>-win-x64.msi` untuk update OTA melalui Print Hub.
+
+Folder `artifacts/package` adalah input build internal dan tidak perlu dikirim.
 
 Untuk membuat versi tertentu tanpa mengubah source terlebih dahulu:
 
