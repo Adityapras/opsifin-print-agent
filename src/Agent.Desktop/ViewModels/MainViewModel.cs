@@ -280,9 +280,9 @@ internal sealed class MainViewModel : ObservableObject, IDisposable
         ? Visibility.Visible
         : Visibility.Collapsed;
 
-    public Visibility UpdateVisibility => latestUpdate is null
-        ? Visibility.Collapsed
-        : Visibility.Visible;
+    public Visibility UpdateVisibility => AgentUpdatePresentation.ShouldDisplay(latestUpdate)
+        ? Visibility.Visible
+        : Visibility.Collapsed;
 
     public string UpdateTitle => latestUpdate?.Status switch
     {

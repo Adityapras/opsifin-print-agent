@@ -126,8 +126,7 @@ internal sealed class TrayIconService : IDisposable
             try
             {
                 var update = await updateStore.LoadAsync(CancellationToken.None);
-                updateItem.Visible = update is not null
-                    && update.Status is not AgentUpdateStatuses.Succeeded;
+                updateItem.Visible = AgentUpdatePresentation.ShouldDisplay(update);
                 if (update is not null)
                 {
                     updateItem.Text = update.Status switch
@@ -153,9 +152,7 @@ internal sealed class TrayIconService : IDisposable
             catch
             {
                 // Kerusakan status update tidak boleh menyembunyikan status Windows Service.
-                updateItem.Visible = true;
-                updateItem.Enabled = true;
-                updateItem.Text = "Update status needs attention";
+                updateItem.Visible = false;
             }
         }
         catch
