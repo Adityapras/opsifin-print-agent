@@ -10,6 +10,9 @@ internal sealed class WindowsDesktopCompanionManager(
 {
     private const uint CreateNewProcessGroup = 0x00000200;
     private const uint CreateUnicodeEnvironment = 0x00000400;
+    private const uint TokenAssignPrimary = 0x0001;
+    private const uint TokenDuplicate = 0x0002;
+    private const uint TokenQuery = 0x0008;
     private readonly string controlPath = Path.Combine(AppContext.BaseDirectory, "Opsifin.Agent.Control.exe");
 
     public async Task<IReadOnlyCollection<int>> StopInstalledInstancesAsync(
@@ -49,6 +52,30 @@ internal sealed class WindowsDesktopCompanionManager(
         return sessions;
     }
 
+    public IReadOnlyCollection<int> GetInteractiveSessionIds()
+    {
+        var sessions = new HashSet<int>();
+        foreach (var process in Process.GetProcessesByName("explorer"))
+        {
+            using (process)
+            {
+                try
+                {
+                    if (process.SessionId > 0)
+                    {
+                        sessions.Add(process.SessionId);
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    // Explorer dapat selesai di antara enumerasi dan pembacaan session.
+                }
+            }
+        }
+
+        return sessions;
+    }
+
     public bool TryStartTray(int sessionId, out string? error)
     {
         try
@@ -76,9 +103,8 @@ internal sealed class WindowsDesktopCompanionManager(
             return false;
         }
 
-        if (!WtsQueryUserToken((uint)sessionId, out var userToken))
+        if (!TryGetInteractiveUserToken(sessionId, out var userToken, out error))
         {
-            error = LastWin32Error();
             return false;
         }
 
@@ -139,12 +165,54 @@ internal sealed class WindowsDesktopCompanionManager(
                 StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool TryGetInteractiveUserToken(
+        int sessionId,
+        out IntPtr userToken,
+        out string? error)
+    {
+        userToken = IntPtr.Zero;
+        error = "No interactive Windows shell is active in this session.";
+        foreach (var process in Process.GetProcessesByName("explorer"))
+        {
+            using (process)
+            {
+                try
+                {
+                    if (process.SessionId != sessionId)
+                    {
+                        continue;
+                    }
+
+                    if (OpenProcessToken(
+                            process.Handle,
+                            TokenAssignPrimary | TokenDuplicate | TokenQuery,
+                            out userToken))
+                    {
+                        error = null;
+                        return true;
+                    }
+
+                    error = LastWin32Error();
+                }
+                catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
+                {
+                    error = exception.Message;
+                }
+            }
+        }
+
+        return false;
+    }
+
     private static string LastWin32Error() =>
         new Win32Exception(Marshal.GetLastWin32Error()).Message;
 
-    [DllImport("wtsapi32.dll", EntryPoint = "WTSQueryUserToken", SetLastError = true)]
+    [DllImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool WtsQueryUserToken(uint sessionId, out IntPtr token);
+    private static extern bool OpenProcessToken(
+        IntPtr processHandle,
+        uint desiredAccess,
+        out IntPtr tokenHandle);
 
     [DllImport("userenv.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

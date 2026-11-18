@@ -13,13 +13,12 @@
     <Icon Id="OpsifinAgentIcon.ico" SourceFile="$(var.BrandAssetsDir)\opsifin-agent.ico" />
     <Property Id="ARPPRODUCTICON" Value="OpsifinAgentIcon.ico" />
 
-    <!-- Setup EXE menutup binary GUI/tray lama sebelum menggantinya. OTA MSI tidak
-         memakai property ini karena lifecycle-nya ditangani service updater. -->
+    <!-- Semua jalur upgrade menutup GUI/tray lama sebelum file diganti. Service baru
+         menyalakan kembali tray pada session Windows yang masih aktif. -->
     <util:CloseApplication
       Id="CloseAgentControl"
       Target="Opsifin.Agent.Control.exe"
       Description="Opsifin Agent Control must close before the update can continue."
-      Condition="OPSIFIN_BUNDLE_INSTALL = 1"
       CloseMessage="yes"
       ElevatedCloseMessage="yes"
       Timeout="5"

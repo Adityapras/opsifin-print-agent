@@ -7,14 +7,14 @@ namespace Agent.Service.Tests;
 public sealed class DesktopCompanionRecoveryTests
 {
     [Fact]
-    public async Task Installing_update_merestart_tray_pada_setiap_session_lama()
+    public async Task Installing_update_merestart_tray_pada_session_lama_dan_aktif()
     {
         var directory = CreateTestDirectory();
         try
         {
             var store = CreateStore(directory);
             await store.SaveAsync(CreateState(AgentUpdateStatuses.Installing), CancellationToken.None);
-            var manager = new FakeCompanionManager([2, 2, 5]);
+            var manager = new FakeCompanionManager([2, 2, 5], [5, 7]);
             var recovery = new DesktopCompanionRecovery(
                 store,
                 manager,
@@ -23,7 +23,7 @@ public sealed class DesktopCompanionRecoveryTests
             await recovery.StartAsync(CancellationToken.None);
 
             Assert.Equal(1, manager.StopCalls);
-            Assert.Equal([2, 5], manager.StartedSessions);
+            Assert.Equal([2, 5, 7], manager.StartedSessions.Order().ToArray());
         }
         finally
         {
@@ -42,7 +42,7 @@ public sealed class DesktopCompanionRecoveryTests
         {
             var store = CreateStore(directory);
             await store.SaveAsync(CreateState(status), CancellationToken.None);
-            var manager = new FakeCompanionManager([2]);
+            var manager = new FakeCompanionManager([2], [7]);
             var recovery = new DesktopCompanionRecovery(
                 store,
                 manager,
@@ -112,7 +112,9 @@ public sealed class DesktopCompanionRecoveryTests
         }
     }
 
-    private sealed class FakeCompanionManager(IReadOnlyCollection<int> sessions) : IDesktopCompanionManager
+    private sealed class FakeCompanionManager(
+        IReadOnlyCollection<int> installedSessions,
+        IReadOnlyCollection<int> interactiveSessions) : IDesktopCompanionManager
     {
         public int StopCalls { get; private set; }
 
@@ -121,8 +123,10 @@ public sealed class DesktopCompanionRecoveryTests
         public Task<IReadOnlyCollection<int>> StopInstalledInstancesAsync(CancellationToken cancellationToken)
         {
             StopCalls++;
-            return Task.FromResult(sessions);
+            return Task.FromResult(installedSessions);
         }
+
+        public IReadOnlyCollection<int> GetInteractiveSessionIds() => interactiveSessions;
 
         public bool TryStartTray(int sessionId, out string? error)
         {
@@ -135,6 +139,9 @@ public sealed class DesktopCompanionRecoveryTests
     private sealed class FailingCompanionManager : IDesktopCompanionManager
     {
         public Task<IReadOnlyCollection<int>> StopInstalledInstancesAsync(CancellationToken cancellationToken) =>
+            throw new EntryPointNotFoundException("test interop failure");
+
+        public IReadOnlyCollection<int> GetInteractiveSessionIds() =>
             throw new EntryPointNotFoundException("test interop failure");
 
         public bool TryStartTray(int sessionId, out string? error) =>

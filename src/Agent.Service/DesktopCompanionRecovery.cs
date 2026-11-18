@@ -6,6 +6,8 @@ internal interface IDesktopCompanionManager
 {
     Task<IReadOnlyCollection<int>> StopInstalledInstancesAsync(CancellationToken cancellationToken);
 
+    IReadOnlyCollection<int> GetInteractiveSessionIds();
+
     bool TryStartTray(int sessionId, out string? error);
 }
 
@@ -35,8 +37,10 @@ internal sealed class DesktopCompanionRecovery(
 
         try
         {
-            var sessions = await companionManager.StopInstalledInstancesAsync(cancellationToken);
-            foreach (var sessionId in sessions.Distinct())
+            var sessions = new HashSet<int>(
+                await companionManager.StopInstalledInstancesAsync(cancellationToken));
+            sessions.UnionWith(companionManager.GetInteractiveSessionIds());
+            foreach (var sessionId in sessions)
             {
                 if (companionManager.TryStartTray(sessionId, out var error))
                 {

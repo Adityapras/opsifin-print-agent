@@ -30,6 +30,21 @@ public sealed class InstallerAuthoringTests
         Assert.Contains("VersionNT64 &gt;= v10.0", bundle, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Semua_jalur_upgrade_menutup_agent_control_lama()
+    {
+        var root = FindRepositoryRoot();
+        var packagePath = Path.Combine(root, "installer", "Package.wxs");
+        var document = System.Xml.Linq.XDocument.Load(packagePath);
+        var closeApplication = document
+            .Descendants()
+            .Single(element => element.Name.LocalName == "CloseApplication");
+
+        Assert.Equal("Opsifin.Agent.Control.exe", closeApplication.Attribute("Target")?.Value);
+        Assert.Null(closeApplication.Attribute("Condition"));
+        Assert.Equal("0", closeApplication.Attribute("TerminateProcess")?.Value);
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
